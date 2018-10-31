@@ -49,6 +49,8 @@ fd.replica.do.delete.data=true
 #true 加载历史数据;false则不加载历史数据。
 fd.load.history.data=true
 
+fd.http.server.port=8080
+
 #cache file
 #记录当前同步数据的位置点。如果该文件存在，会优先从该文件的位置点进行同步。
 fd.mysql.binlog.cache.file=/var/log/fd_binlog_pos.info

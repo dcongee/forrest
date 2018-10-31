@@ -1,0 +1,209 @@
+#!/bin/sh
+#set HOME
+CURR_DIR=`pwd`
+cd `dirname "$0"`/..
+FORREST_HOME=`pwd`
+#cd $CURR_DIR
+if [ -z "$FORREST_HOME" ] ; then
+    echo
+    echo "Error: FORREST_HOME environment variable is not defined correctly."
+    echo
+    exit 1
+fi
+#==============================================================================
+
+#==============================================================================
+PID_DIR="$FORREST_HOME"/run
+PID_FILE="$PID_DIR"/forrest-server.pid
+FORREST_LOGS="$FORREST_HOME"/logs/forrest.log
+JAVA_BIN=java
+
+#with CMS Garbage Collection
+#JAVA_OPTS="-server -Xms4G -Xmx4G -XX:MaxDirectMemorySize=24G"
+JAVA_OPTS="-server -Xms4G -Xmx4G"
+
+#with G1 Garbage Collection
+#JAVA_OPTS="-server -Xms16G -Xmx16G -XX:MaxDirectMemorySize=24G"
+
+#JRE7
+#JAVA_OPTS="$JAVA_OPTS -XX:-UseSplitVerifier"
+#JRE8
+JAVA_OPTS="$JAVA_OPTS -noverify"
+
+#performance Options
+JAVA_OPTS="$JAVA_OPTS -XX:+PrintFlagsFinal"
+JAVA_OPTS="$JAVA_OPTS -XX:+AggressiveOpts"
+JAVA_OPTS="$JAVA_OPTS -XX:AutoBoxCacheMax=20000"
+#JAVA_OPTS="$JAVA_OPTS -XX:-UseBiasedLocking"
+#JAVA_OPTS="$JAVA_OPTS -XX:+AlwaysPreTouch"
+#JAVA_OPTS="$JAVA_OPTS -XX:+PerfDisableSharedMem"
+
+
+#GC Options
+#JAVA_OPTS="$JAVA_OPTS -XX:ParallelGCThreads=32"
+#JAVA_OPTS="$JAVA_OPTS -XX:+DisableExplicitGC"
+#JAVA_OPTS="$JAVA_OPTS -XX:+ParallelRefProcEnabled"
+
+#CMS Garbage Collection Options
+JAVA_OPTS="$JAVA_OPTS -XX:+UseConcMarkSweepGC"
+JAVA_OPTS="$JAVA_OPTS -XX:+UseParNewGC"
+JAVA_OPTS="$JAVA_OPTS -XX:NewRatio=1"
+JAVA_OPTS="$JAVA_OPTS -XX:SurvivorRatio=2"
+JAVA_OPTS="$JAVA_OPTS -XX:TargetSurvivorRatio=90"
+#JAVA_OPTS="$JAVA_OPTS -XX:MaxTenuringThreshold=30"
+#JAVA_OPTS="$JAVA_OPTS -XX:CMSMarkStackSize=2M"
+#JAVA_OPTS="$JAVA_OPTS -XX:CMSMarkStackSizeMax=8M"
+#JAVA_OPTS="$JAVA_OPTS -XX:+CMSClassUnloadingEnabled"
+#JAVA_OPTS="$JAVA_OPTS -XX:+CMSPermGenSweepingEnabled "
+
+#Garbage First (G1) Garbage Collection Options
+#JAVA_OPTS="$JAVA_OPTS -XX:+UseG1GC"
+#JAVA_OPTS="$JAVA_OPTS -XX:MaxGCPauseMillis=200"
+#JAVA_OPTS="$JAVA_OPTS -XX:InitiatingHeapOccupancyPercent=45"
+#JAVA_OPTS="$JAVA_OPTS -XX:ConcGCThreads=24"
+#JAVA_OPTS="$JAVA_OPTS -XX:G1ReservePercent=10"
+#JAVA_OPTS="$JAVA_OPTS -XX:G1HeapRegionSize=32M"
+
+#GC Log Options
+#JAVA_OPTS="$JAVA_OPTS -Xloggc:/$FORREST_HOME/logs/gc.log"
+#JAVA_OPTS="$JAVA_OPTS -XX:+PrintGCApplicationStoppedTime"
+#JAVA_OPTS="$JAVA_OPTS -XX:+PrintGCTimeStamps"
+#JAVA_OPTS="$JAVA_OPTS -XX:+PrintGCDetails"
+#debug Options
+#JAVA_OPTS="$JAVA_OPTS -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=9005 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false"
+#JAVA_OPTS="$JAVA_OPTS -Xdebug -Xrunjdwp:transport=dt_socket,address=8065,server=y,suspend=n"
+#==============================================================================
+
+#set CLASSPATH
+FORREST_CLASSPATH="$FORREST_HOME/conf:$FORREST_HOME/lib/classes"
+for i in "$FORREST_HOME"/lib/*.jar
+do
+    FORREST_CLASSPATH="$FORREST_CLASSPATH:$i"
+done
+#==============================================================================
+
+
+function start_forrest_server(){
+if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE");
+then
+	echo "WARN: Forrest-Server service already running (PID: $(cat $PID_FILE))." >&2
+	exit 1
+fi
+
+if [[ !  -d $PID_DIR  ]]
+then
+	mkdir -p $PID_DIR
+fi
+
+RUN_CMD="$JAVA_BIN "
+RUN_CMD="$RUN_CMD -DFORREST_HOME=\"$FORREST_HOME\""
+RUN_CMD="$RUN_CMD -classpath \"$FORREST_CLASSPATH\""
+RUN_CMD="$RUN_CMD $JAVA_OPTS"
+RUN_CMD="$RUN_CMD com.forrest.data.ForrestData  $@"
+RUN_CMD="$RUN_CMD >> \"$FORREST_HOME/logs/console.log\" 2>&1 &"
+echo $RUN_CMD
+
+echo "INFO: Start Forrest-Server ..."
+
+eval $RUN_CMD
+RETVAL=$?
+PID=$!
+var=0
+
+while true
+do
+sleep 3
+if [[ $RETVAL -eq 0 && `ps -ef |grep ForrestData | grep $FORREST_HOME |grep $PID |grep -v grep | wc -l` -gt 0 ]]
+	then
+		echo $PID > $PID_FILE && echo "INFO: Forrest-Server start successed." 
+		return 0
+fi
+var=`expr $var+3`
+if [[ $var -eq 15  ]]
+then
+        if [[  -f $PID_FILE ]] 
+        then
+        	rm -fr $PID_FILE
+	fi
+        echo "ERROR: Forrest-Server start failed.see log with $FORREST_LOGS"
+        return 1
+fi
+done
+return 0
+#==============================================================================
+}
+
+function stop_forrest_server(){
+    	if [ ! -f "$PID_FILE" ];
+	then
+   		echo 'WARN: Forrest not running,please check with this command: ps -ef |grep ForrestData | grep $FORREST_HOME |grep -v grep'
+    		return 1
+    	fi
+
+    	echo 'INFO: Stopping Forrest-Server ...'
+    	PID=`cat "$PID_FILE"`
+	kill -15 $(cat "$PID_FILE")
+	while true
+	do
+		sleep 3
+		if [[  `ps -ef |grep ForrestData | grep $FORREST_HOME |grep $PID |grep -v grep | wc -l` -eq 0  ]]
+			then
+			echo 'INFO: Forrest-Server stop successed.'
+			rm -f "$PID_FILE"
+			return 0;
+		else
+			kill -15 $(cat "$PID_FILE") 
+#			echo "ERROR: Forrest-Server stopped failed,please check with this command: ps -ef |grep $PID |grep -v grep"
+		fi
+	done
+}
+
+function status_forrest_server {
+	if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE");
+        then
+                echo "INFO: Forrest-Server service already running (PID: $(cat $PID_FILE))." >&2
+                return 0
+	else	
+		echo "INFO: Forrest-Server service not running."
+		return 0
+        fi
+}
+
+
+
+
+function usage {
+	echo "Usage: sh $0 [ha] [start|stop|status|restart]"
+	echo "example:"
+    	echo "Forrest-Server start     :	sh $0 start"
+    	echo "Forrest-Server stop      :	sh $0 stop"
+	echo "Forrest-Server status    :	sh $0 status"
+	echo "Forrest-Server restart   :	sh $0 restart"
+	
+    	exit 1 
+}
+
+
+case "$1" in
+    start)
+        start_forrest_server
+	exit $?
+        ;;
+    stop)
+        stop_forrest_server
+	exit $?
+        ;;
+    restart)
+	stop_forrest_server
+	start_forrest_server
+	exit $?
+	;;
+     status)
+        status_forrest_server
+        exit $?
+        ;;
+       *)
+	usage
+        exit 2
+esac
+

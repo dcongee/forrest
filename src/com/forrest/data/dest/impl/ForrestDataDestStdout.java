@@ -21,17 +21,31 @@ public class ForrestDataDestStdout extends ForrestDataAbstractDestination implem
 	@Override
 	public boolean deliverDest(List<Map<String, Object>> rowResultList) {
 		String binLongFileName, binlogPosition;
+		// try {
+		// Thread.sleep(3 * 1000);
+		// } catch (InterruptedException e) {
+		// e.printStackTrace();
+		// }
 		for (Map<String, Object> row : rowResultList) {
 			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
 			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
 				this.flushMetaData(row);
-				this.saveBinlogPos(binLongFileName, binlogPosition);
+				if (config.getGtidEnable()) {
+					this.saveBinlogPos(binLongFileName, binlogPosition,
+							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+				} else {
+					this.saveBinlogPos(binLongFileName, binlogPosition, null);
+				}
 				continue;
 			}
 			System.out.println(this.getJsonStringFromMap(row));
-			this.saveBinlogPos((String) row.get(ForrestDataConfig.metaBinLogFileName),
-					(String) row.get(ForrestDataConfig.metaBinlogPositionName));
+			if (config.getGtidEnable()) {
+				this.saveBinlogPos(binLongFileName, binlogPosition,
+						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+			} else {
+				this.saveBinlogPos(binLongFileName, binlogPosition, null);
+			}
 
 		}
 		return true;

@@ -117,27 +117,49 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 		// TODO Auto-generated method stub
 		String binLongFileName = null;
 		String binlogPosition = null;
-		try {
-			for (Map<String, Object> row : rowResultList) {
-				binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
-				binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
-				if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
-					this.flushMetaData(row);
-					this.saveBinlogPos(binLongFileName, binlogPosition);
-					continue;
+		for (Map<String, Object> row : rowResultList) {
+			this.deliverTryTimes = 0;
+			this.deliverOK = false;
+
+			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
+			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
+			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
+				this.flushMetaData(row);
+				if (config.getGtidEnable()) {
+					this.saveBinlogPos(binLongFileName, binlogPosition,
+							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+				} else {
+					this.saveBinlogPos(binLongFileName, binlogPosition, null);
 				}
-				channel.basicPublish(this.exchangeName, this.routingKeyName, MessageProperties.PERSISTENT_TEXT_PLAIN,
-						this.getByteArrayFromMapJson(row));
-				this.saveBinlogPos(binLongFileName, binlogPosition);
+				continue;
 			}
-		} catch (Exception e) {
-			// e.printStackTrace();
-			// System.exit(1);
-			logger.error("rabbitmq deliver exception: " + e.getMessage());
+			// channel.basicPublish(this.exchangeName, this.routingKeyName,
+			// MessageProperties.PERSISTENT_TEXT_PLAIN,
+			// this.getByteArrayFromMapJson(row));
+			while (!deliverOK) {
+				deliverOK = this.deliver(row);
+				this.isWait();
+			}
+			if (config.getGtidEnable()) {
+				this.saveBinlogPos(binLongFileName, binlogPosition,
+						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+			} else {
+				this.saveBinlogPos(binLongFileName, binlogPosition, null);
+			}
+		}
+		return true;
+	}
+
+	public boolean deliver(Map<String, Object> row) {
+		try {
+			channel.basicPublish(this.exchangeName, this.routingKeyName, MessageProperties.PERSISTENT_TEXT_PLAIN,
+					this.getByteArrayFromMapJson(row));
+		} catch (IOException e) {
+			e.printStackTrace();
+			logger.error("rabbitmq deliver failed: " + e.getMessage());
 			return false;
 		}
 		return true;
-
 	}
 
 	public void deliverDest(String str) {

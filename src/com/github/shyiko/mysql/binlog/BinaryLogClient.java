@@ -573,6 +573,8 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
 					}
 				}
 				if (binlogFilename == null) {
+					logger.warn(
+							"binlogFilename is null,fetch binlog filename and position with sql: show master status");
 					fetchBinlogFilenameAndPosition();
 				}
 				if (binlogPosition < 4) {
@@ -702,7 +704,10 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
 		Command dumpBinaryLogCommand;
 		synchronized (gtidSetAccessLock) {
 			if (gtidSet != null) {
-				dumpBinaryLogCommand = new DumpBinaryLogGtidCommand(serverId, binlogFilename, binlogPosition, gtidSet);
+				// dumpBinaryLogCommand = new DumpBinaryLogGtidCommand(serverId, binlogFilename,
+				// binlogPosition, gtidSet);
+				// GTID模式不需要binlogfilename与position
+				dumpBinaryLogCommand = new DumpBinaryLogGtidCommand(serverId, "", 4, gtidSet);
 			} else {
 				dumpBinaryLogCommand = new DumpBinaryLogCommand(serverId, binlogFilename, binlogPosition);
 			}
@@ -745,7 +750,7 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
 			StringBuffer errorBuffer = new StringBuffer();
 			errorBuffer.append("ERROR " + errorSqlCode).append(" (");
 			errorBuffer.append(errorSqlState).append("): ").append(errorSqlMessage);
-			logger.error(errorBuffer.toString());
+			logger.error(errorBuffer.toString() + ": " + this.binlogFilename);
 			System.exit(1);
 		}
 		// ErrorPacket error = new ErrorPacket(b);

@@ -24,10 +24,10 @@ public class ForrestMonitor {
 
 	private RowResult rowResult;
 
-	private Map<String, String> monitorMap;
+	private Map<String, Object> monitorMap;
 
 	public ForrestMonitor() {
-		this.monitorMap = new HashMap<String, String>();
+		this.monitorMap = new HashMap<String, Object>();
 	}
 
 	public ForrestMonitor(RowResult rowResult) {
@@ -128,22 +128,28 @@ public class ForrestMonitor {
 		this.rowResult = rowResult;
 	}
 
-	public Map<String, String> getMonitorMap() {
+	public Map<String, Object> getMonitorMap() {
 		return monitorMap;
 	}
 
-	public void setMonitorMap(Map<String, String> monitorMap) {
+	public void setMonitorMap(Map<String, Object> monitorMap) {
 		this.monitorMap = monitorMap;
 	}
 
-	public void putReadBinlogInfo(String binglogFileName, String binlogPosition) {
+	public void putReadBinlogInfo(String binglogFileName, Object binlogPosition, Object gtid) {
 		this.monitorMap.put("read_master_binlog_file", binglogFileName);
 		this.monitorMap.put("read_master_binlog_position", binlogPosition);
+		if (gtid != null) {
+			this.monitorMap.put("read_master_gtid", gtid);
+		}
 	}
 
-	public void putExecBinlogInfo(String binglogFileName, String binlogPosition) {
+	public void putExecBinlogInfo(String binglogFileName, Object binlogPosition, Object gtid) {
 		this.monitorMap.put("exec_master_binlog_file", binglogFileName);
 		this.monitorMap.put("exec_master_binlog_position", binlogPosition);
+		if (gtid != null) {
+			this.monitorMap.put("read_master_gtid", gtid);
+		}
 	}
 
 }

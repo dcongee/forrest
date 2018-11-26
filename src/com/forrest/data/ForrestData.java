@@ -13,7 +13,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 import org.apache.log4j.Logger;
 
-import com.alibaba.fastjson.JSON;
 import com.forrest.data.config.ForrestDataConfig;
 import com.forrest.data.dest.ForrestDataDestination;
 import com.forrest.data.dest.impl.ForrestDataDestElasticSearch;
@@ -21,7 +20,6 @@ import com.forrest.data.dest.impl.ForrestDataDestFile;
 import com.forrest.data.dest.impl.ForrestDataDestRabbitMQ;
 import com.forrest.data.dest.impl.ForrestDataDestRedis;
 import com.forrest.data.dest.impl.ForrestDataDestStdout;
-import com.forrest.data.file.io.BinlogPosProcessor;
 import com.forrest.data.load.ForrestLoadHistoryData;
 import com.forrest.data.queue.QueueConsumerThread;
 import com.forrest.http.ForrestHttpServer;
@@ -33,6 +31,7 @@ import com.github.shyiko.mysql.binlog.event.Event;
 import com.github.shyiko.mysql.binlog.event.EventHeader;
 import com.github.shyiko.mysql.binlog.event.EventHeaderV4;
 import com.github.shyiko.mysql.binlog.event.FormatDescriptionEventData;
+import com.github.shyiko.mysql.binlog.event.GtidEventData;
 import com.github.shyiko.mysql.binlog.event.QueryEventData;
 import com.github.shyiko.mysql.binlog.event.RotateEventData;
 import com.github.shyiko.mysql.binlog.event.TableMapEventData;
@@ -47,19 +46,34 @@ public class ForrestData {
 		this.queue = queue;
 	}
 
-	public void toJsonStr(List<Map<String, Object>> rowResultList) {
-		// String jsonString = JSON.toJSONString(rowResultList);
-		for (Map<String, Object> row : rowResultList) {
-			System.out.println(JSON.toJSONString(row));
-			BinlogPosProcessor.saveCurrentBinlogPosToCacheFile((String) row.get(ForrestDataConfig.metaBinLogFileName),
-					(String) row.get(ForrestDataConfig.metaBinlogPositionName));
+	public void setGtid(BinaryLogClient client, ForrestDataConfig config, RowResult rowResult) {
+		if (config.getGtidMap() != null && config.getGtidMap().size() > 0) {
+			StringBuffer gtid = new StringBuffer();
+			int i = 0;
+			Map<String, String> gtidMap = config.getGtidMap();
+			int size = gtidMap.size();
+			for (Map.Entry<String, String> entry : gtidMap.entrySet()) {
+				i++;
+				gtid.append(entry.getKey()).append(":").append(entry.getValue());
+				if (i < size) {
+					gtid.append(",");
+				}
+			}
+			client.setGtidSet(gtid.toString());
+			rowResult.setGtidMap(gtidMap);
+		} else {
+			client.setGtidSet(config.getGetServerUUID() + ":1-1");
 		}
 	}
 
 	public void startForrestData(BinaryLogClient client, ForrestDataConfig config, RowResult rowResult,
 			ForrestMonitor forrestMonitor) {
-		if (config.getBinlogFileName().length() == 0 || config.getBinlogCacheFileName() == null) { // fd.mysql.binlog.log.file.name参数不给值，从最新的binlog位置开始
-			client.setBinlogFilename(null);
+		if (config.getGtidEnable()) {
+			setGtid(client, config, rowResult);
+		} else {
+			if (config.getBinlogFileName().length() == 0 || config.getBinlogCacheFileName() == null) { // fd.mysql.binlog.log.file.name参数不给值，从最新的binlog位置开始
+				client.setBinlogFilename(null);
+			}
 		}
 		try {
 
@@ -68,37 +82,33 @@ public class ForrestData {
 				@Override
 				public void onEvent(Event event) {
 					EventHeader header = event.getHeader();
-					// EventHeaderV4 headerV4 = (EventHeaderV4) header;
 					BitSet columnSet = null;
-					// System.out.println(header1.getPosition());
-					// System.out.println(header1.getNextPosition());
 
 					switch (header.getEventType()) {
 					case FORMAT_DESCRIPTION:
 						FormatDescriptionEventData formatData = (FormatDescriptionEventData) event.getData();
-						// System.out.println("Server version:" + formatData.getServerVersion() + ".
-						// Binlog version: "
-						// + formatData.getBinlogVersion());
 						logger.info("Server version:" + formatData.getServerVersion() + ". Binlog version: "
 								+ formatData.getBinlogVersion());
 						rowResult.setBinLogFile(client.getBinlogFilename());
 						rowResult.setBinLogPos(client.getBinlogPosition());
-						BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
-						forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(),
-								String.valueOf(rowResult.getBinLogPos()));
+						// if (config.getGtidEnable()) {
+						// }
+						forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(), rowResult.getBinLogPos(),
+								rowResult.getGtidMap());
 						break;
 					case GTID:
-						// GtidEventData gtidData = (GtidEventData) event.getData();
-						// System.out.println("gitid number: " + gtidData.getGtid());
+						if (config.getGtidEnable()) {
+							GtidEventData gtidData = (GtidEventData) event.getData();
+							rowResult.addToGtidMap(gtidData.getGtid());
+						}
 						break;
 					case QUERY:
 						QueryEventData queryData = (QueryEventData) event.getData();
 						String sql = queryData.getSql();
-						// System.out.println("SQL INFO: " + sql);
-
 						String ddlType = sql.trim().split(" ")[0].toUpperCase();
 						if (ddlType.equals("CREATE") || ddlType.equals("ALTER") || ddlType.equals("DROP")) {
-							List<Map<String, Object>> ddlResultList = parseExtQueryRowEvent(event, rowResult);
+							List<Map<String, Object>> ddlResultList = parseExtQueryRowEvent(event, rowResult,
+									config.getGtidEnable());
 							if (ddlResultList != null) {
 								try {
 									queue.put(ddlResultList);
@@ -108,93 +118,47 @@ public class ForrestData {
 							}
 						}
 
-						// rowResult.setBinLogPos(headerV4.getNextPosition());
-						// BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
-						// System.out.println(sql);
 						break;
 					case TABLE_MAP:
 						TableMapEventData tableData = (TableMapEventData) event.getData();
 						rowResult.setDatabaseName(tableData.getDatabase().toUpperCase());
 						rowResult.setTableName(tableData.getTable().toUpperCase());
-						// rowResult.setBinLogPos(headerV4.getNextPosition());
 						if (!ForrestDataConfig.filterMap
 								.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
-							// BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
 							break;
 						}
-
-						// System.out.println("schema info: " + tableData.getDatabase() + "." +
-						// tableData.getTable());
 						break;
 					case WRITE_ROWS:
+						parseInsertRowEvent(event, rowResult, forrestMonitor, config.getGtidEnable());
 						break;
 					case EXT_WRITE_ROWS:
-						List<Map<String, Object>> insertResultList = parseExtWriteRowEvent(event, rowResult);
-						if (insertResultList != null) {
-							// dest.deliverDest(insertResultList);
-							try {
-								queue.put(insertResultList);
-							} catch (InterruptedException e) {
-								e.printStackTrace();
-							}
-							forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(),
-									String.valueOf(rowResult.getBinLogPos()));
-
-						}
+						parseInsertRowEvent(event, rowResult, forrestMonitor, config.getGtidEnable());
 						break;
 					case UPDATE_ROWS:
+						parseUpdateRowEvent(event, rowResult, columnSet, forrestMonitor, config.getGtidEnable());
 						break;
 					case EXT_UPDATE_ROWS:
-						List<Map<String, Object>> updateResultList = parseExtUpdateRowEvent(event, rowResult,
-								columnSet);
-						if (updateResultList != null) {
-							// dest.deliverDest(updateResultList);
-							try {
-								queue.put(updateResultList);
-							} catch (InterruptedException e) {
-								e.printStackTrace();
-							}
-							forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(),
-									String.valueOf(rowResult.getBinLogPos()));
-						}
+						parseUpdateRowEvent(event, rowResult, columnSet, forrestMonitor, config.getGtidEnable());
 						break;
 					case DELETE_ROWS:
+						parseDeleteRowEvent(event, rowResult, columnSet, forrestMonitor, config.getGtidEnable());
 						break;
 					case EXT_DELETE_ROWS:
-						List<Map<String, Object>> deleteResultList = parseExtDeleteRowEvent(event, rowResult,
-								columnSet);
-						if (deleteResultList != null) {
-							// dest.deliverDest(deleteResultList);
-							try {
-								queue.put(deleteResultList);
-							} catch (InterruptedException e) {
-								e.printStackTrace();
-							}
-							forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(),
-									String.valueOf(rowResult.getBinLogPos()));
-						}
+						parseDeleteRowEvent(event, rowResult, columnSet, forrestMonitor, config.getGtidEnable());
 						break;
 					case XID:
-						// XidEventData xidData = (XidEventData) event.getData();
-						// long xid = xidData.getXid();
-						// System.out.println("XID number: " + xid);
-						// rowResult.setBinLogPos(headerV4.getNextPosition());
-						// BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
 						break;
 					case ROTATE:
 						RotateEventData rotateData = (RotateEventData) event.getData();
-						// System.out.println(
-						// "ROATE: " + rotateData.getBinlogFilename() + " " +
-						// rotateData.getBinlogPosition());
 						rowResult.setBinLogFile(rotateData.getBinlogFilename());
 						rowResult.setBinLogPos(rotateData.getBinlogPosition());
-						forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(),
-								String.valueOf(rowResult.getBinLogPos()));
-						// BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rotateData.getBinlogFilename(),
-						// String.valueOf(rotateData.getBinlogPosition()));
+						// if (config.getGtidEnable()) {
+						// rowResult.setGtid(client.getGtidSet());
+						// }
+						forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(), rowResult.getBinLogPos(),
+								rowResult.getGtidMap());
 						break;
 					default:
-						// System.out.println("Other type: " + header.getEventType().toString());
 						break;
 					}
 				}
@@ -205,12 +169,61 @@ public class ForrestData {
 		}
 	}
 
-	List<Map<String, Object>> parseExtWriteRowEvent(Event event, RowResult rowResult) {
+	public void parseGtidEvent() {
+
+	}
+
+	public void parseTableMapEvent() {
+
+	}
+
+	public void parseInsertRowEvent(Event event, RowResult rowResult, ForrestMonitor forrestMonitor,
+			boolean gtidEnable) {
+		List<Map<String, Object>> insertResultList = parseExtWriteRowEvent(event, rowResult, gtidEnable);
+		if (insertResultList != null) {
+			try {
+				queue.put(insertResultList);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(), rowResult.getBinLogPos(),
+					rowResult.getGtidMap());
+		}
+	}
+
+	public void parseUpdateRowEvent(Event event, RowResult rowResult, BitSet columnSet, ForrestMonitor forrestMonitor,
+			boolean gtidEnable) {
+		List<Map<String, Object>> updateResultList = parseExtUpdateRowEvent(event, rowResult, columnSet, gtidEnable);
+		if (updateResultList != null) {
+			try {
+				queue.put(updateResultList);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(), rowResult.getBinLogPos(),
+					rowResult.getGtidMap());
+		}
+	}
+
+	public void parseDeleteRowEvent(Event event, RowResult rowResult, BitSet columnSet, ForrestMonitor forrestMonitor,
+			boolean gtidEnable) {
+		List<Map<String, Object>> deleteResultList = parseExtDeleteRowEvent(event, rowResult, columnSet, gtidEnable);
+		if (deleteResultList != null) {
+			try {
+				queue.put(deleteResultList);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(), rowResult.getBinLogPos(),
+					rowResult.getGtidMap());
+		}
+	}
+
+	List<Map<String, Object>> parseExtWriteRowEvent(Event event, RowResult rowResult, boolean gtidEnable) {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 		if (!ForrestDataConfig.filterMap.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
-			BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
 			return null;
 		}
 		WriteRowsEventData writeData = (WriteRowsEventData) event.getData();
@@ -229,6 +242,11 @@ public class ForrestData {
 			rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 																											// pos点
 			rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
+			if (gtidEnable) {
+				HashMap<String, String> gtidMap = new HashMap<String, String>();
+				gtidMap.putAll(rowResult.getGtidMap());
+				rowMap.put(ForrestDataConfig.metaGTIDName, gtidMap);
+			}
 			for (int i = 0; i < s.length; i++) {
 				String columnName = null;
 				if (columnSet.get(i)) {
@@ -251,13 +269,13 @@ public class ForrestData {
 		return insertResultList;
 	}
 
-	List<Map<String, Object>> parseExtUpdateRowEvent(Event event, RowResult rowResult, BitSet columnSet) {
+	List<Map<String, Object>> parseExtUpdateRowEvent(Event event, RowResult rowResult, BitSet columnSet,
+			boolean gtidEnable) {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 		if (!ForrestDataConfig.doUpdateData || !ForrestDataConfig.filterMap
 				.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
-			BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
 			return null;
 		}
 		UpdateRowsEventData updateData = (UpdateRowsEventData) event.getData();
@@ -273,6 +291,11 @@ public class ForrestData {
 			rowMap.put(ForrestDataConfig.metaTableName, rowResult.getTableName());
 			rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 			rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
+			if (gtidEnable) {
+				HashMap<String, String> gtidMap = new HashMap<String, String>();
+				gtidMap.putAll(rowResult.getGtidMap());
+				rowMap.put(ForrestDataConfig.metaGTIDName, gtidMap);
+			}
 			Serializable[] beforValue = entry.getKey();
 			Serializable[] afterValue = entry.getValue();
 			for (int i = 0; i < beforValue.length; i++) {
@@ -309,14 +332,14 @@ public class ForrestData {
 		return updateResultList;
 	}
 
-	List<Map<String, Object>> parseExtDeleteRowEvent(Event event, RowResult rowResult, BitSet columnSet) {
+	List<Map<String, Object>> parseExtDeleteRowEvent(Event event, RowResult rowResult, BitSet columnSet,
+			boolean gtidEnable) {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 
 		if (!ForrestDataConfig.doDeleteData || !ForrestDataConfig.filterMap
 				.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
-			BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(rowResult);
 			return null;
 		}
 		DeleteRowsEventData deleteData = (DeleteRowsEventData) event.getData();
@@ -330,6 +353,11 @@ public class ForrestData {
 			rowMap.put(ForrestDataConfig.metaTableName, rowResult.getTableName());
 			rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 			rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
+			if (gtidEnable) {
+				HashMap<String, String> gtidMap = new HashMap<String, String>();
+				gtidMap.putAll(rowResult.getGtidMap());
+				rowMap.put(ForrestDataConfig.metaGTIDName, gtidMap);
+			}
 			for (int i = 0; i < s.length; i++) {
 				String columnName = null;
 				if (columnSet.get(i)) {
@@ -352,17 +380,20 @@ public class ForrestData {
 		return deleteResultList;
 	}
 
-	List<Map<String, Object>> parseExtQueryRowEvent(Event event, RowResult rowResult) {
+	List<Map<String, Object>> parseExtQueryRowEvent(Event event, RowResult rowResult, boolean gtidEnable) {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 		List<Map<String, Object>> ddlResultList = new ArrayList<Map<String, Object>>();
 		Map<String, Object> rowMap = new HashMap<String, Object>();
 		rowMap.put(ForrestDataConfig.metaSqltypeName, "DDL");
-		// rowMap.put(ForrestDataConfig.metaDatabaseName, rowResult.getDatabaseName());
-		// rowMap.put(ForrestDataConfig.metaTableName, rowResult.getTableName());
 		rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 		rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
+		if (gtidEnable) {
+			HashMap<String, String> gtidMap = new HashMap<String, String>();
+			gtidMap.putAll(rowResult.getGtidMap());
+			rowMap.put(ForrestDataConfig.metaGTIDName, gtidMap);
+		}
 		ddlResultList.add(rowMap);
 		return ddlResultList;
 	}
@@ -389,6 +420,36 @@ public class ForrestData {
 			}
 		});
 
+	}
+
+	public void loadHistoryData(ForrestDataConfig config, ForrestDataDestination dest) {
+		new ForrestLoadHistoryData(queue, config);
+		dest.saveBinlogPos(config.getBinlogFileName(), String.valueOf(config.getBinlogPostion()), config.getGtidMap());
+	}
+
+	public void addMonitorInfo(ForrestMonitor forrestMonitor, ForrestDataConfig config) {
+		forrestMonitor.getMonitorMap().put("destination_data_source", config.getDsType());
+		forrestMonitor.getMonitorMap().put("mysql_server", config.getMysqlHost());
+		forrestMonitor.getMonitorMap().put("mysql_user", config.getMysqlUser());
+		forrestMonitor.getMonitorMap().put("mysql_port", config.getMysqlPort());
+		forrestMonitor.getMonitorMap().put("mysql_server_id", config.getMysqlServerID());
+		forrestMonitor.getMonitorMap().put("mysql_gtid_enable", config.getGtidEnable());
+		forrestMonitor.getMonitorMap().put("do_update", ForrestDataConfig.doUpdateData);
+		forrestMonitor.getMonitorMap().put("do_delete", ForrestDataConfig.doDeleteData);
+		forrestMonitor.getMonitorMap().put("queue_length", config.getQueueLength());
+
+		forrestMonitor.getMonitorMap().put("do_table", config.getReplicaDBTables());
+		forrestMonitor.getMonitorMap().put("load_history_data", config.isLoadHistoryData());
+		forrestMonitor.getMonitorMap().put("binlog_cache_file", config.getBinlogCacheFileName());
+
+		forrestMonitor.getMonitorMap().put("meta_data_tablename", ForrestDataConfig.metaTableName);
+		forrestMonitor.getMonitorMap().put("meta_data_databasename", ForrestDataConfig.metaDatabaseName);
+		forrestMonitor.getMonitorMap().put("meta_data_binlogfilename", ForrestDataConfig.metaBinLogFileName);
+		forrestMonitor.getMonitorMap().put("meta_data_binlogposition", ForrestDataConfig.metaBinlogPositionName);
+		forrestMonitor.getMonitorMap().put("meta_data_sqltype", ForrestDataConfig.metaSqltypeName);
+		forrestMonitor.getMonitorMap().put("meta_data_gtidname", ForrestDataConfig.metaGTIDName);
+		forrestMonitor.getMonitorMap().put("update_beforname", ForrestDataConfig.updateBeforName);
+		forrestMonitor.getMonitorMap().put("update_aftername", ForrestDataConfig.updateAfterName);
 	}
 
 	public static void main(String[] args) {
@@ -433,26 +494,39 @@ public class ForrestData {
 			break;
 		}
 		logger.info("destination is " + config.getDsType());
-		forrestMonitor.getMonitorMap().put("destination_data_source", config.getDsType());
+		forrestData.addMonitorInfo(forrestMonitor, config);
 
 		consumer = new QueueConsumerThread(queue, dest, true);
 		consumer.start();
 
-		if (config.isLoadHistoryData() && config.getBinlogFileName().length() == 0) {
-			new ForrestLoadHistoryData(queue, config, consumer);
-			dest.saveBinlogPos(config.getBinlogFileName(), String.valueOf(config.getBinlogPostion()));
+		RowResult rowResult = RowResult.getInstance();
+
+		// fd.load.history.data=true且binlogFileName为空，则加载历史数据
+		if (config.isLoadHistoryData()) {
+			if (config.getGtidEnable()) {
+				if (config.getGtidMap() == null || config.getGtidMap().size() == 0) {
+					forrestData.loadHistoryData(config, dest);
+				}
+			} else {
+				if (config.getBinlogFileName().length() == 0)
+					forrestData.loadHistoryData(config, dest);
+			}
+		} else {
+			if (config.getGtidEnable()) {
+				if (config.getGtidMap() == null || config.getGtidMap().size() == 0) {
+					ForrestLoadHistoryData forrestloadHistData = new ForrestLoadHistoryData(config);
+					forrestloadHistData.fetchCurrentBinlogPosition();
+				}
+			}
 		}
 
 		String binLogFile = config.getBinlogFileName();
 		long binLogPos = config.getBinlogPostion();
 
-		RowResult rowResult = RowResult.getInstance();
-		// rowResult.setBinLogFile(config.getBinlogFileName());
-
 		BinaryLogClient client = new BinaryLogClient(host, port, serverID, user, password, binLogFile, binLogPos, null);
 
-		// ForrestMonitor forrestMonitor = new ForrestMonitor(rowResult);
-		ForrestHttpServer forrestHttpServer = new ForrestHttpServer(config.getHttpServerPort(), forrestMonitor);
+		ForrestHttpServer forrestHttpServer = new ForrestHttpServer(config.getHttpServerHost(),
+				config.getHttpServerPort(), forrestMonitor);
 		forrestHttpServer.start();
 
 		forrestData.addShutdownHook(consumer);

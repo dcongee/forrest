@@ -31,6 +31,10 @@ public class ForrestDataConfig {
 	private String mysqlDBname;
 
 	private int mysqlServerID;
+	private boolean gtidEnable = false;
+	// private String gtid;
+	private String uuid;
+	private Map<String, String> gtidMap;
 	private String binlogFileName;
 	private long binlogPostion;
 
@@ -38,7 +42,8 @@ public class ForrestDataConfig {
 	private boolean loadHistoryData = false;
 	private int queueLength = 1024;
 
-	private int httpServerPort = 808;
+	private int httpServerPort = 8080;
+	private String httpServerHost = "127.0.0.1";
 
 	private String binlogCacheFilePath;
 	private String[] replicaDBTables;
@@ -50,6 +55,7 @@ public class ForrestDataConfig {
 	public static String metaDatabaseName = "DATABASE_NAME";
 	public static String metaBinLogFileName = "BINLOG_FILE";
 	public static String metaBinlogPositionName = "BINLOG_POS";
+	public static String metaGTIDName = "MYSQL_GTID";
 	public static String metaSqltypeName = "SQL_TYPE";
 
 	public static boolean doUpdateData = false;
@@ -321,6 +327,10 @@ public class ForrestDataConfig {
 			this.mysqlPasswd = properties.getProperty("fd.mysql.passwd").trim();
 			this.mysqlDBname = properties.getProperty("fd.mysql.dbname").trim();
 			this.mysqlServerID = Integer.valueOf(properties.getProperty("fd.mysql.serverid").trim());
+			this.gtidEnable = Boolean.valueOf(properties.getProperty("fd.mysql.gtid.enable").trim());
+
+			binlogPosCharMaxLength = Integer.valueOf(properties.getProperty("fd.position.char.max.length").trim());
+
 			this.binlogFileName = properties.getProperty("fd.mysql.binlog.log.file.name").trim();
 
 			// this.binlogPostion =
@@ -340,19 +350,34 @@ public class ForrestDataConfig {
 			metaBinLogFileName = properties.getProperty("fd.meta.data.binlogfilename").trim();
 			metaBinlogPositionName = properties.getProperty("fd.meta.data.binlogposition").trim();
 			metaSqltypeName = properties.getProperty("fd.meta.data.sqltype").trim();
+			metaGTIDName = properties.getProperty("fd.meta.data.mysql.gtidname").trim();
 
-			File binlogCacheFile = new File(this.binlogCacheFilePath);
 			in.close();
+
+			mysqlServerCheck();
+			File binlogCacheFile = new File(this.binlogCacheFilePath);
 			BinlogPosProcessor.randomAccessFile = new RandomAccessFile(binlogCacheFile, "rw");
 			if (binlogCacheFile.exists()) {
 				String str = BinlogPosProcessor.randomAccessFile.readLine();
 				if (str != null && str != "") {
+					str = str.trim();
 					if (str.length() > binlogPosCharMaxLength) {
-						System.err.println("char length of binlog file name and position is too long,than "
+						logger.error("char length of binlog file name and position is too long,than "
 								+ (binlogPosCharMaxLength - 1));
+						System.exit(1);
 					}
 					this.binlogFileName = str.split(" ")[0];
 					this.binlogPostion = Long.valueOf(str.split(" ")[1].trim());
+					if (this.gtidEnable) {
+						if (str.length() == 3) {
+							gtidMap = new HashMap<String, String>();
+							String gtid = str.split(" ")[2];
+							String[] gtidSet = gtid.split(",");
+							for (String gtidStr : gtidSet) {
+								gtidMap.put(gtidStr.split(":")[0], gtidStr.split(":")[1]);
+							}
+						}
+					}
 				}
 			}
 		} catch (IOException e) {
@@ -373,11 +398,34 @@ public class ForrestDataConfig {
 		updateBeforName = properties.getProperty("fd.result.data.update.beforname").trim();
 		updateAfterName = properties.getProperty("fd.result.data.update.aftername").trim();
 
-		httpServerPort = Integer.valueOf(properties.getProperty("fd.http.server.port").trim());
+		httpServerPort = Integer.valueOf(properties.getProperty("fd.http.server.bind.port").trim());
+		httpServerHost = properties.getProperty("fd.http.server.bind.host").trim();
 
 		initDoDBTable(str);
 		getMetaDataInfo();
 		getTablePrimary();
+	}
+
+	public String getGetServerUUID() {
+		Connection con = this.getConnection();
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String sql = "show global variables like 'server_uuid'";
+		try {
+			ps = con.prepareStatement(sql);
+			rs = ps.executeQuery();
+			while (rs.next()) {
+				this.uuid = rs.getString("value");
+			}
+		} catch (SQLException e) {
+			logger.error("get mysql server uuid failed.");
+			e.printStackTrace();
+			System.exit(1);
+			// return null;
+		} finally {
+			this.close(con, ps, rs);
+		}
+		return this.uuid;
 	}
 
 	public void initDoDBTable(String str) {
@@ -536,6 +584,46 @@ public class ForrestDataConfig {
 		this.httpServerPort = httpServerPort;
 	}
 
+	public String getHttpServerHost() {
+		return httpServerHost;
+	}
+
+	public void setHttpServerHost(String httpServerHost) {
+		this.httpServerHost = httpServerHost;
+	}
+
+	public boolean getGtidEnable() {
+		return gtidEnable;
+	}
+
+	public void setGtidEnable(boolean gtidEnable) {
+		this.gtidEnable = gtidEnable;
+	}
+
+	// public String getGtid() {
+	// return gtid;
+	// }
+	//
+	// public void setGtid(String gtid) {
+	// this.gtid = gtid;
+	// }
+
+	public String getUuid() {
+		return uuid;
+	}
+
+	public void setUuid(String uuid) {
+		this.uuid = uuid;
+	}
+
+	public Map<String, String> getGtidMap() {
+		return gtidMap;
+	}
+
+	public void setGtidMap(Map<String, String> gtidMap) {
+		this.gtidMap = gtidMap;
+	}
+
 	public static void main(String[] args) {
 		ForrestDataConfig config = new ForrestDataConfig();
 		config.initConfig();
@@ -543,4 +631,75 @@ public class ForrestDataConfig {
 
 	}
 
+	/**
+	 * 检查mysql参数设置. mysql log_bin参数必须为on binlog_format参数必须为ROW
+	 * 当使用gtid时，gtid_mode必须为on
+	 */
+	public void mysqlServerCheck() {
+		// TODO Auto-generated method stub
+		Connection con = this.getConnection();
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String gtidSQL = "show global variables like 'gtid_mode'";
+		String logBinSQL = "show global variables like 'log_bin'";
+		String rowFormatSQL = "show global variables like 'binlog_format'";
+		String gtidMode = null;
+		String logBin = null;
+		String rowFormat = null;
+		try {
+			if (this.gtidEnable) {
+				ps = con.prepareStatement(gtidSQL);
+				rs = ps.executeQuery();
+				while (rs.next()) {
+					gtidMode = rs.getString("value");
+				}
+				if (!gtidMode.toUpperCase().equals("ON")) {
+					logger.error("forrest gtid is enabled,but mysql server system variable gtid_mode is not on.");
+					this.close(con, ps, rs);
+					System.exit(1);
+				} else {
+					this.close(ps);
+					this.close(ps);
+				}
+
+				ps = con.prepareStatement(logBinSQL);
+				rs = ps.executeQuery();
+				while (rs.next()) {
+					logBin = rs.getString("value");
+				}
+
+				if (!logBin.toUpperCase().equals("ON")) {
+					logger.error("mysql server system variable log_bin is not on.");
+					this.close(con, ps, rs);
+					System.exit(1);
+				} else {
+					this.close(ps);
+					this.close(ps);
+				}
+
+				ps = con.prepareStatement(rowFormatSQL);
+				rs = ps.executeQuery();
+				while (rs.next()) {
+					rowFormat = rs.getString("value");
+				}
+
+				if (!rowFormat.toUpperCase().equals("ROW")) {
+					logger.error("mysql server system variable binlog_format is not ROW.");
+					this.close(con, ps, rs);
+					System.exit(1);
+				} else {
+					this.close(ps);
+					this.close(ps);
+				}
+
+			}
+		} catch (SQLException e) {
+			logger.error("mysql system variable check failed,may be server is shutdown");
+			e.printStackTrace();
+			System.exit(1);
+		} finally {
+			this.close(con, ps, rs);
+		}
+
+	}
 }

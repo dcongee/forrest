@@ -83,6 +83,7 @@ public class ForrestDataDestRedis extends ForrestDataAbstractDestination impleme
 			jedisPoolConfig.setMinIdle(3);
 			jedisPoolConfig.setMaxIdle(5);
 			jedisPoolConfig.setMaxTotal(10);
+			jedisPoolConfig.setMaxWaitMillis(1000);
 			if (redisPasswd.length() == 0) {
 				this.jedisPool = new JedisPool(jedisPoolConfig, redisHost, redisPort, 10000);
 			} else {
@@ -105,14 +106,21 @@ public class ForrestDataDestRedis extends ForrestDataAbstractDestination impleme
 		Jedis jedis = this.jedisPool.getResource();
 		String binLongFileName = null;
 		String binlogPosition = null;
+		Map<String, String> gtid = null;
 		try {
 			Pipeline pipeLine = jedis.pipelined();
 			for (Map<String, Object> row : rowResultList) {
 				binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 				binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
+				gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
 				if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
 					this.flushMetaData(row);
-					this.saveBinlogPos(binLongFileName, binlogPosition);
+					if (config.getGtidEnable()) {
+						this.saveBinlogPos(binLongFileName, binlogPosition,
+								(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+					} else {
+						this.saveBinlogPos(binLongFileName, binlogPosition, null);
+					}
 					continue;
 				}
 				jedis.rpush(this.redisKeyName, this.getJsonStringFromMap(row));
@@ -124,7 +132,11 @@ public class ForrestDataDestRedis extends ForrestDataAbstractDestination impleme
 		} finally {
 			this.jedisPool.returnResource(jedis);
 		}
-		this.saveBinlogPos(binLongFileName, binlogPosition);
+		if (config.getGtidEnable()) {
+			this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
+		} else {
+			this.saveBinlogPos(binLongFileName, binlogPosition, null);
+		}
 		return true;
 	}
 

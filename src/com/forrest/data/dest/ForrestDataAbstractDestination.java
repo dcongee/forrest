@@ -54,11 +54,13 @@ public abstract class ForrestDataAbstractDestination {
 	 * @param binLongFileName
 	 * @param binlogPosition
 	 */
-	public void saveBinlogPos(String binLongFileName, String binlogPosition) {
+	public void saveBinlogPos(String binLongFileName, String binlogPosition, Map<String, String> gtid) {
 		saveOK = false;
 		saveTryTimes = 0;
 		while (!saveOK) {
-			saveOK = BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(binLongFileName, binlogPosition);
+			saveOK = gtid == null
+					? BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(binLongFileName, binlogPosition, null)
+					: BinlogPosProcessor.saveCurrentBinlogPosToCacheFile(binLongFileName, binlogPosition, gtid);
 			saveTryTimes++;
 			if (saveTryTimes > 10) { // 超过10次，就间隔一秒再重试，防止产生大量的日志，将磁盘刷满
 				try {
@@ -68,11 +70,7 @@ public abstract class ForrestDataAbstractDestination {
 				}
 			}
 		}
-		// forrestMonitor.getMonitorMap().put("exec_master_binlog_position",
-		// binlogPosition);
-		// forrestMonitor.getMonitorMap().put("exec_master_binlog_file",
-		// binLongFileName);
-		forrestMonitor.putExecBinlogInfo(binLongFileName, binlogPosition);
+		forrestMonitor.putExecBinlogInfo(binLongFileName, binlogPosition, gtid);
 	}
 
 	public void flushMetaData(Map<String, Object> row) {
@@ -156,6 +154,20 @@ public abstract class ForrestDataAbstractDestination {
 			row.remove(ForrestDataConfig.metaBinLogFileName);
 			row.remove(ForrestDataConfig.metaBinlogPositionName);
 			row.remove(ForrestDataConfig.metaSqltypeName);
+		}
+	}
+
+	/**
+	 * 是否需要等待 如果重试次数过多（deliverTryTimes>10），则等待1秒
+	 */
+	public void isWait() {
+		deliverTryTimes++;
+		if (deliverTryTimes > 10) { // 超过10次，就间隔一秒再重试，防止产生大量的日志，将磁盘刷满
+			try {
+				Thread.sleep(1000);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 

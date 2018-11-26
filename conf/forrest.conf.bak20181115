@@ -1,0 +1,48 @@
+#grant replication slave,replication client,select,Reload,SUPER,Event,Execute,PROCESS on *.* to 'repl'@'%' identified by 'repl';
+fd.mysql.host=192.168.137.101
+fd.mysql.port=3306
+fd.mysql.user=maxwell
+fd.mysql.passwd=maxwell
+fd.mysql.dbname=information_schema
+
+#mysql binlog 配置
+fd.mysql.serverid=33130
+
+#fd.mysql.binlog.log.file.name为空,将从最新的一个位置开始复制.
+fd.mysql.binlog.log.file.name=
+fd.mysql.binlog.log.pos=4
+
+
+#######################replica destination start#################
+#elasticsearch,redis,rabbitmq,stdout,file
+fd.ds.type=redis
+#######################replica destination end###################
+
+#filter db and table policy
+fd.replica.do.db.table=wuhp.*
+fd.replica.do.update.data=true
+fd.replica.do.delete.data=true
+
+#true 加载历史数据;false则不加载历史数据。
+fd.load.history.data=true
+
+fd.server.unique.identification=mysql123
+
+fd.queue.length=1024
+
+fd.http.server.bind.host=127.0.0.1
+fd.http.server.bind.port=8080
+
+
+#cache file
+fd.mysql.binlog.cache.file=D:\\fd_binlog_pos.info
+
+#meta data name
+fd.meta.data.tablename=TABLE_NAME
+fd.meta.data.databasename=DATABASE_NAME
+fd.meta.data.binlogfilename=BINLOG_FILE
+fd.meta.data.binlogposition=BINLOG_POS
+fd.meta.data.sqltype=SQL_TYPE
+
+fd.result.data.update.beforname=BEFOR_VALUE
+fd.result.data.update.aftername=AFTER_VALUE

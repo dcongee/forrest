@@ -1,5 +1,8 @@
 package com.forrest.data;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class RowResult {
 	// List<ColumnResult> columnResultList;
 	String sqlType;
@@ -7,10 +10,12 @@ public class RowResult {
 	String tableName;
 	String binLogFile;
 	Long binLogPos;
-
+	// String gtid;
+	Map<String, String> gtidMap;
 	private static volatile RowResult rowResult;
 
 	public RowResult() {
+		this.gtidMap = new HashMap<String, String>();
 	}
 
 	public static RowResult getInstance() {
@@ -62,6 +67,37 @@ public class RowResult {
 
 	public void setBinLogPos(Long binLogPos) {
 		this.binLogPos = binLogPos;
+	}
+
+	// public String getGtid() {
+	// return gtid;
+	// }
+	//
+	// public void setGtid(String gtid) {
+	// this.gtid = gtid;
+	// }
+
+	public void setGtidMap(Map<String, String> gtidMap) {
+		this.gtidMap = gtidMap;
+	}
+
+	public void addToGtidMap(String gtid) {
+		String[] gtidArry = gtid.split(":");
+		String uuid = gtidArry[0];
+		String transactionID = gtidArry[1];
+		this.gtidMap.put(uuid, "1-" + transactionID);
+	}
+
+	public Map<String, String> getGtidMap() {
+		return this.gtidMap;
+	}
+
+	public static RowResult getRowResult() {
+		return rowResult;
+	}
+
+	public static void setRowResult(RowResult rowResult) {
+		RowResult.rowResult = rowResult;
 	}
 
 }

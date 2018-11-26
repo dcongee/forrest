@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -102,7 +103,12 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 			// DDL操作刷新表数据。
 			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
 				this.flushMetaData(row);
-				this.saveBinlogPos(binLongFileName, binlogPosition);
+				if (config.getGtidEnable()) {
+					this.saveBinlogPos(binLongFileName, binlogPosition,
+							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+				} else {
+					this.saveBinlogPos(binLongFileName, binlogPosition, null);
+				}
 				continue;
 			}
 
@@ -144,7 +150,12 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 			default:
 				break;
 			}
-			this.saveBinlogPos(binLongFileName, binlogPosition);
+			if (config.getGtidEnable()) {
+				this.saveBinlogPos(binLongFileName, binlogPosition,
+						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+			} else {
+				this.saveBinlogPos(binLongFileName, binlogPosition, null);
+			}
 		}
 		return true;
 	}
@@ -321,7 +332,12 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 			String binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 			String binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
 			logger.warn("not found primary key in table " + esIndex + "." + esType + ",ignore this data: " + row);
-			this.saveBinlogPos(binLongFileName, binlogPosition);
+			if (config.getGtidEnable()) {
+				this.saveBinlogPos(binLongFileName, binlogPosition,
+						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+			} else {
+				this.saveBinlogPos(binLongFileName, binlogPosition, null);
+			}
 			return false;
 		}
 		return true;

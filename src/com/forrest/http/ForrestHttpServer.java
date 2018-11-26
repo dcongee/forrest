@@ -32,8 +32,10 @@ public class ForrestHttpServer extends Thread implements Runnable {
 	private Logger logger = Logger.getLogger(ForrestHttpServer.class);
 	private int port;
 	private ForrestMonitor forrestMonitor;
+	private String host;
 
-	public ForrestHttpServer(int port, ForrestMonitor forrestMonitor) {
+	public ForrestHttpServer(String host, int port, ForrestMonitor forrestMonitor) {
+		this.host = host;
 		this.port = port;
 		this.forrestMonitor = forrestMonitor;
 		logger.info("http listening port:" + port);
@@ -52,7 +54,7 @@ public class ForrestHttpServer extends Thread implements Runnable {
 
 			Channel ch;
 			try {
-				ch = b.bind(port).sync().channel();
+				ch = b.bind(host, port).sync().channel();
 				ch.closeFuture().sync();
 			} catch (InterruptedException e) {
 				logger.error("forrest http server start failed.");

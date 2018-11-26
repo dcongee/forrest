@@ -16,27 +16,39 @@ import org.apache.log4j.Logger;
 
 import com.forrest.data.ForrestDataUtil;
 import com.forrest.data.config.ForrestDataConfig;
-import com.forrest.data.queue.QueueConsumerThread;
 
 public class ForrestLoadHistoryData {
 	private static Logger logger = Logger.getLogger(ForrestLoadHistoryData.class);
 
 	private BlockingQueue<List<Map<String, Object>>> queue;
 	private ForrestDataConfig config;
-	QueueConsumerThread consumer;
 
-	public ForrestLoadHistoryData(BlockingQueue<List<Map<String, Object>>> queue, ForrestDataConfig config,
-			QueueConsumerThread consumer) {
+	public ForrestLoadHistoryData(BlockingQueue<List<Map<String, Object>>> queue, ForrestDataConfig config) {
 		this.queue = queue;
 		this.config = config;
-		this.consumer = consumer;
-
 		Connection con = config.getConnection();
 		if (!loadHistoryData(con)) {
 			logger.error("load data failed.");
 			// queue.clear();
 			// consumer.currentThread().interrupt();
 			System.exit(1);
+		}
+	}
+
+	public ForrestLoadHistoryData(ForrestDataConfig config) {
+		this.config = config;
+	}
+
+	public void fetchCurrentBinlogPosition() {
+		logger.info("gtid is empty,fetch gtid from mysql master.");
+		Connection con = config.getConnection();
+		try {
+			if (!this.getCurrentBinlogPosition(con)) {
+				logger.error("fetch gtid from mysql  failed.");
+				System.exit(1);
+			}
+		} finally {
+			config.close(con);
 		}
 	}
 
@@ -132,13 +144,25 @@ public class ForrestLoadHistoryData {
 		try {
 			ps = con.prepareStatement(sql);
 			rs = ps.executeQuery();
-
+			Map<String, String> gtidMap = new HashMap<String, String>();
 			while (rs.next()) {
 				config.setBinlogFileName(rs.getString("File"));
 				config.setBinlogPostion(rs.getLong("Position"));
+				if (config.getGtidEnable()) {
+					String[] gtidSet = rs.getString("Executed_Gtid_Set").replaceAll("\n", "").split(",");
+					for (String gtidStr : gtidSet) {
+						gtidMap.put(gtidStr.split(":")[0], gtidStr.split(":")[1]);
+					}
+				}
 			}
-
-			logger.info("current binlog postion:" + config.getBinlogFileName() + ":" + config.getBinlogPostion());
+			config.setGtidMap(gtidMap);
+			if (config.getGtidEnable()) {
+				logger.info("current binlog postion:" + config.getBinlogFileName() + ":" + config.getBinlogPostion()
+						+ ", current gtid:" + config.getGtidMap() + ".");
+			} else {
+				logger.info(
+						"current binlog postion:" + config.getBinlogFileName() + ":" + config.getBinlogPostion() + ".");
+			}
 
 		} catch (SQLException e) {
 			config.close(con);
@@ -210,8 +234,7 @@ public class ForrestLoadHistoryData {
 					for (String columnName : tableColumnSet) {
 						String columnValue = rs.getString(columnName);
 						rowMap.put(columnName, columnValue);
-						
-						
+
 						// if (entry.getKey().equals("WUHP.T5")) {
 						// System.out.println(columnName + " " + columnValue);
 						// }
@@ -227,6 +250,9 @@ public class ForrestLoadHistoryData {
 					rowMap.put(ForrestDataConfig.metaDatabaseName, databaseTableKeys[0]);
 					rowMap.put(ForrestDataConfig.metaTableName, databaseTableKeys[1]);
 					rowMap.put(ForrestDataConfig.metaSqltypeName, "INSERT");
+					if (config.getGtidEnable()) {
+						rowMap.put(ForrestDataConfig.metaGTIDName, config.getGtidMap());
+					}
 
 					rowList.add(rowMap);
 					if (rowList.size() == 100) {
@@ -276,6 +302,10 @@ public class ForrestLoadHistoryData {
 		String d = "0000-00-00";
 		map.put("1", d);
 		System.out.println(map.get("1"));
+
+		String str = "2772720e-6430-11e8-b673-000c29960a6c:1-36";
+		String[] s = str.split(",");
+		System.out.println(s[0]);
 	}
 
 }

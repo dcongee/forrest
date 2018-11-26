@@ -24,7 +24,6 @@ import com.alibaba.fastjson.JSON;
 import com.forrest.monitor.ForrestMonitor;
 
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -63,7 +62,7 @@ public class ForrestHttpServerHandler extends SimpleChannelInboundHandler<HttpOb
 			boolean keepAlive = HttpUtil.isKeepAlive(req);
 			// FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, OK,
 			// Unpooled.wrappedBuffer(CONTENT));
-			Map<String, String> map = forrestMonitor.getMonitorMap();
+			Map<String, Object> map = forrestMonitor.getMonitorMap();
 
 			FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, OK,
 					Unpooled.wrappedBuffer(JSON.toJSONString(map).getBytes()));

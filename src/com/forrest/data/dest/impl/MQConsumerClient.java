@@ -16,10 +16,10 @@ public class MQConsumerClient {
 	public static void main(String[] args) throws IOException, TimeoutException {
 
 		ConnectionFactory factory = new ConnectionFactory();
-		factory.setHost("192.168.137.101");
+		factory.setHost("172.16.0.31");
 		factory.setPort(5672);
-		factory.setUsername("test");
-		factory.setPassword("test");
+		factory.setUsername("quzeng");
+		factory.setPassword("quzeng");
 		// 打开连接和创建频道，与发送端一样
 		Connection connection = factory.newConnection();
 		final Channel channel = connection.createChannel();
@@ -49,6 +49,8 @@ public class MQConsumerClient {
 			}
 		};
 		channel.basicConsume("MYSQL_QUEUE", true, consumer);
+		
+		System.out.println(1);
 	}
 
 }

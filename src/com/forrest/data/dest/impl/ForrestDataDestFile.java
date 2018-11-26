@@ -21,16 +21,14 @@ public class ForrestDataDestFile extends ForrestDataAbstractDestination implemen
 	private static Logger logger = Logger.getLogger(ForrestData.class);
 	private OutputStreamWriter op;
 
-	public ForrestDataDestFile(ForrestDataConfig config,ForrestMonitor forrestMonitor) {
+	public ForrestDataDestFile(ForrestDataConfig config, ForrestMonitor forrestMonitor) {
 		this.config = config;
 		this.forrestMonitor = forrestMonitor;
 		File file = new File("result.txt");
 		try {
 			try {
 				this.op = new OutputStreamWriter(new FileOutputStream(file), "utf-8");
-				
-			
-				
+
 			} catch (UnsupportedEncodingException e) {
 				e.printStackTrace();
 			}
@@ -42,14 +40,19 @@ public class ForrestDataDestFile extends ForrestDataAbstractDestination implemen
 
 	@Override
 	public boolean deliverDest(List<Map<String, Object>> rowResultList) {
-		String binLongFileName=null;
-		String binlogPosition=null;
+		String binLongFileName = null;
+		String binlogPosition = null;
 		for (Map<String, Object> row : rowResultList) {
-			 binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
-			 binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
+			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
+			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
 			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
 				this.flushMetaData(row);
-				this.saveBinlogPos(binLongFileName, binlogPosition);
+				if (config.getGtidEnable()) {
+					this.saveBinlogPos(binLongFileName, binlogPosition,
+							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+				} else {
+					this.saveBinlogPos(binLongFileName, binlogPosition, null);
+				}
 				continue;
 			}
 			// System.out.println(JSON.toJSONString(row));
@@ -64,8 +67,12 @@ public class ForrestDataDestFile extends ForrestDataAbstractDestination implemen
 				logger.error("file deliver exception: " + e.getMessage());
 				return false;
 			}
-			this.saveBinlogPos((String) row.get(ForrestDataConfig.metaBinLogFileName),
-					(String) row.get(ForrestDataConfig.metaBinlogPositionName));
+			if (config.getGtidEnable()) {
+				this.saveBinlogPos(binLongFileName, binlogPosition,
+						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
+			} else {
+				this.saveBinlogPos(binLongFileName, binlogPosition, null);
+			}
 		}
 		return true;
 	}

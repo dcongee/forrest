@@ -30,6 +30,7 @@ public class GtidEventDataDeserializer implements EventDataDeserializer<GtidEven
         byte flags = (byte) inputStream.readInteger(1);
         byte[] sid = inputStream.read(16);
         long gno = inputStream.readLong(8);
+        
         eventData.setFlags(flags);
         eventData.setGtid(byteArrayToHex(sid, 0, 4) + "-" +
             byteArrayToHex(sid, 4, 2) + "-" +

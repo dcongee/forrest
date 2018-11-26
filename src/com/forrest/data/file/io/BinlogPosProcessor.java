@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.Map;
 
 import org.apache.log4j.Logger;
 
@@ -18,9 +19,31 @@ public class BinlogPosProcessor implements Runnable {
 	private static Logger logger = Logger.getLogger(BinlogPosProcessor.class);
 	public static RandomAccessFile randomAccessFile;
 
-	public static boolean saveCurrentBinlogPosToCacheFile(String binLogFileName, String binLogPosition) {
-		byte[] content = new StringBuffer().append(binLogFileName).append(" ").append(binLogPosition).toString()
-				.getBytes();
+	private static boolean saveOK = false;
+	private static int saveTryTimes = 0;
+	private static byte[] contents = null;
+
+	public static boolean saveCurrentBinlogPosToCacheFile(String binLogFileName, Object binLogPosition,
+			Map<String, String> gtidMap) {
+		if (gtidMap == null) {
+			contents = new StringBuffer().append(binLogFileName).append(" ").append(binLogPosition).toString()
+					.getBytes();
+		} else {
+			StringBuffer gtidStr = new StringBuffer().append(binLogFileName).append(" ").append(binLogPosition)
+					.append(" ");
+
+			int i = 0;
+			int size = gtidMap.size();
+			for (Map.Entry<String, String> entry : gtidMap.entrySet()) {
+				i++;
+				gtidStr.append(entry.getKey()).append(":").append(entry.getValue());
+				if (i < size) {
+					gtidStr.append(",");
+				}
+
+			}
+			contents = gtidStr.toString().getBytes();
+		}
 		try {
 			randomAccessFile.seek(0);
 		} catch (IOException e) {
@@ -29,10 +52,10 @@ public class BinlogPosProcessor implements Runnable {
 			return false;
 		}
 
-		if (content.length < 96) {
+		if (contents.length < ForrestDataConfig.binlogPosCharMaxLength) {
 			try {
-				randomAccessFile.write(content);
-				randomAccessFile.write(new byte[ForrestDataConfig.binlogPosCharMaxLength - content.length]);
+				randomAccessFile.write(contents);
+				randomAccessFile.write(new byte[ForrestDataConfig.binlogPosCharMaxLength - contents.length]);
 			} catch (IOException e) {
 				// e.printStackTrace();
 				logger.error(e.getMessage());
@@ -47,8 +70,48 @@ public class BinlogPosProcessor implements Runnable {
 	}
 
 	public static void saveCurrentBinlogPosToCacheFile(RowResult rowResult) {
-		saveCurrentBinlogPosToCacheFile(rowResult.getBinLogFile(), String.valueOf(rowResult.getBinLogPos()));
+		saveOK = false;
+		saveTryTimes = 0;
+		while (!saveOK) {
+			saveOK = saveCurrentBinlogPosToCacheFile(rowResult.getBinLogFile(), rowResult.getBinLogPos(), null);
+			saveTryTimes++;
+			if (saveTryTimes > 10) { // 超过10次，就间隔一秒再重试，防止产生大量的日志，将磁盘刷满
+				logger.error("save binlog position to file failed, retry times: " + saveTryTimes);
+				try {
+					Thread.sleep(1000);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+	}
 
+	public static boolean saveGtid(String binLogFileName, Object binLogPosition, String gtid) {
+		byte[] content = new StringBuffer().append(binLogFileName).append(" ").append(binLogPosition).append(" ")
+				.append(gtid).toString().getBytes();
+		try {
+			randomAccessFile.seek(0);
+		} catch (IOException e) {
+			// e.printStackTrace();
+			logger.error(e.getMessage());
+			return false;
+		}
+
+		if (content.length < ForrestDataConfig.binlogPosCharMaxLength) {
+			try {
+				randomAccessFile.write(content);
+				randomAccessFile.write(new byte[ForrestDataConfig.binlogPosCharMaxLength - content.length]);
+			} catch (IOException e) {
+				// e.printStackTrace();
+				logger.error(e.getMessage());
+				return false;
+			}
+		} else {
+			logger.error("char length of binlog file name and position is too long,than "
+					+ (ForrestDataConfig.binlogPosCharMaxLength - 1));
+			return false;
+		}
+		return true;
 	}
 
 	public static void closeBinlogCacheFile(FileOutputStream fos1, FileOutputStream fos2) {
@@ -128,17 +191,9 @@ public class BinlogPosProcessor implements Runnable {
 		// "D:\\workspace\\flowdata\\cache.file";
 		// BinlogPosProcessor.saveCurrentBinlogPosToCacheFile("mysql-bin.000020",
 		// "7000000000000000000000000000000000000000000000000000000000110");
-
-		try {
-			BinlogPosProcessor.randomAccessFile = new RandomAccessFile(new File("D:\\workspace\\flowdata\\cache.file"),
-					"rw");
-			BinlogPosProcessor.saveCurrentBinlogPosToCacheFile("mysql-bin.000020",
-					"700000000000000000000000000000000000000000000000000000000000000000000000000110");
-			BinlogPosProcessor.saveCurrentBinlogPosToCacheFile("mysql-bin.000020", "1110");
-		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+		String a = "123" + " ";
+		a = a + " 345,123";
+		System.out.println(a);
 
 	}
 

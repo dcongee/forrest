@@ -81,11 +81,13 @@ public class ForrestDataConfig {
 		}
 		// &noDatetimeStringSync=true 可以将0000-00-00的日期转换成string，但毫秒与微秒会出现乱码
 		// &zeroDateTimeBehavior=convertToNull
+		//useCursorFetch=true&
+		//useServerPreparedStmts=true&cachePrepStmts=true&allowMultiQueries=true
 
 		try {
 			conn = DriverManager.getConnection("jdbc:mysql://" + this.mysqlHost + ":" + this.mysqlPort + "/"
 					+ this.mysqlDBname
-					+ "?useCursorFetch=true&zeroDateTimeBehavior=convertToNull&verifyServerCertificate=false&useSSL=false",
+					+ "?useCursorFetch=true&useServerPreparedStmts=true&cachePrepStmts=true&allowMultiQueries=true&zeroDateTimeBehavior=convertToNull&verifyServerCertificate=false&useSSL=false",
 					this.mysqlUser, this.mysqlPasswd);
 		} catch (SQLException e) {
 			// e.printStackTrace();

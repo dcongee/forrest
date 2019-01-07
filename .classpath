@@ -30,7 +30,7 @@
 	<classpathentry kind="lib" path="lib/lucene-sandbox-6.6.0.jar"/>
 	<classpathentry kind="lib" path="lib/t-digest-3.2.jar"/>
 	<classpathentry kind="lib" path="lib/elasticsearch-5.5.2.jar" sourcepath="C:/Users/wuhp/.m2/repository/org/elasticsearch/elasticsearch/5.5.2/elasticsearch-5.5.2-sources.jar"/>
-	<classpathentry kind="lib" path="lib/mysql-connector-java-5.1.47.jar"/>
+	<classpathentry kind="lib" path="lib/mysql-connector-java-5.1.47.jar" sourcepath="D:/java/mysql-connector-java-5.1.47.zip"/>
 	<classpathentry kind="lib" path="lib/netty-all-4.1.30.Final.jar" sourcepath="D:/java/netty-4.1.30.Final/netty-4.1.30.Final/jar/all-in-one/netty-all-4.1.30.Final-sources.jar"/>
 	<classpathentry kind="lib" path="lib/netty-3.10.6.Final.jar"/>
 	<classpathentry kind="lib" path="lib/transport-netty4-client-5.5.2.jar"/>

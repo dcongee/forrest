@@ -103,40 +103,56 @@ public class ForrestDataDestRedis extends ForrestDataAbstractDestination impleme
 	@Override
 	public boolean deliverDest(List<Map<String, Object>> rowResultList) {
 		// TODO Auto-generated method stub
+
+		this.deliverTryTimes = 0;
+		this.deliverOK = false;
+
+		while (!deliverOK) {
+			deliverOK = this.deliver(rowResultList);
+			this.isWait();
+		}
+		return true;
+	}
+
+	public boolean deliver(List<Map<String, Object>> rowResultList) {
 		Jedis jedis = this.jedisPool.getResource();
 		String binLongFileName = null;
 		String binlogPosition = null;
 		Map<String, String> gtid = null;
+		String sqlType = null;
 		try {
 			Pipeline pipeLine = jedis.pipelined();
 			for (Map<String, Object> row : rowResultList) {
 				binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 				binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
-				gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
-				if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
-					this.flushMetaData(row);
-					if (config.getGtidEnable()) {
-						this.saveBinlogPos(binLongFileName, binlogPosition,
-								(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-					} else {
-						this.saveBinlogPos(binLongFileName, binlogPosition, null);
-					}
+				sqlType = ((String) row.get(ForrestDataConfig.metaSqltypeName));
+
+				if (config.getGtidEnable()) {
+					gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
+				}
+
+				if (sqlType.equals("DDL")) {
+					this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 					continue;
 				}
+
+				// 删除meta data info
+				if (ForrestDataConfig.ignoreMetaDataName) {
+					this.removeMetadataData(row);
+				}
+
 				jedis.rpush(this.redisKeyName, this.getJsonStringFromMap(row));
 			}
 			pipeLine.sync();
 		} catch (Exception e) {
 			logger.error("redis deliver exception: " + e.getMessage());
+			e.printStackTrace();
 			return false;
 		} finally {
 			this.jedisPool.returnResource(jedis);
 		}
-		if (config.getGtidEnable()) {
-			this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
-		} else {
-			this.saveBinlogPos(binLongFileName, binlogPosition, null);
-		}
+
+		this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 		return true;
 	}
 

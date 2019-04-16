@@ -16,7 +16,7 @@ INSERT数据格式：
 
 
 2、配置说明
-2.1、主配置文件conf/fd.conf
+2.1、主配置文件conf/forrest.conf
 #mysql的配置信息。
 #mysql数据库用户名与密码;mysql用户最少需要replication slave,replication client,select,Reload,SUPER,Event,Execute,PROCESS权限，对information_Schema有select权限。
 #通过语句增加mysql用户：grant replication slave,replication client,select,Reload,SUPER,Event,Execute,PROCESS on *.* to 'username'@'%' identified by 'passwd';
@@ -26,13 +26,18 @@ fd.mysql.user=username
 fd.mysql.passwd=password
 fd.mysql.dbname=information_schema
 fd.mysql.serverid=33130
+
+#该参数为true时，使用GITD的方式同步数据
+fd.mysql.gtid.enable=true
+
+
 #mysqlbinlog配置信息，将从下面的位置点开始同步；可以通过show master status获取位置点。fd.mysql.binlog.log.file.name为空，则从最新的位置点开始同步数据。
 fd.mysql.binlog.log.file.name=
 fd.mysql.binlog.log.pos=4
 
 
 #######################replica destination start#################
-#数据同步到目标数据源，可以支持：redis,rabbitmq,stdout,file。若目标数据源为redis，则需要在redis.conf中配置redis信息；目标数据源为rabbitmq，则需要在rabbitmq.conf中配置rabbitmq信息。
+#数据同步到目标数据源，可以支持：redis,rabbitmq,stdout,file,elasticSearch。若目标数据源为redis，则需要在redis.conf中配置redis信息；目标数据源为rabbitmq，则需要在rabbitmq.conf中配置rabbitmq信息。
 #只能同步到一个目标数据源。
 fd.ds.type=rabbitmq
 #######################replica destination end###################
@@ -40,20 +45,37 @@ fd.ds.type=rabbitmq
 #filter db and table policy
 #过滤策略：*.*表示同步所有的库与表的数据；test.*表示同步test库下所有表的数据；test.a表示同步test库中的a表数据；多个过滤策略用逗号隔开。
 fd.replica.do.db.table=test.*,test1.*
+
 #true表示同步update操作的数据，false则不同步
 fd.replica.do.update.data=true
+
 #true表示同步delete操作的数据，false则不同步
 fd.replica.do.delete.data=true
 
+#表字段过滤。格式为，dbname1.tablename1.{column1 column2},dbname2.tablename2.{column1 column2}
+fd.replica.ignore.table.column=wuhp.w.{name test},wuhp.w1.{name}
 
-#true 加载历史数据;false则不加载历史数据。
-fd.load.history.data=true
-
-fd.http.server.port=8081
 
 #cache file
 #记录当前同步数据的位置点。如果该文件存在，会优先从该文件的位置点进行同步。
 fd.mysql.binlog.cache.file=/var/log/fd_binlog_pos.info
+
+#true 加载历史数据;false则不加载历史数据。
+#当fd.mysql.binlog.cache.file参数中的文件存在时，并且不为空。则开始不会加载历史数据。
+#fd.load.history.data=true时， fd.mysql.gtid.enable=false时，如果获取不到binlog与position信息，则会加载全表数据。
+#fd.load.history.data=false时， fd.mysql.gtid.enable=false时，如果获取不到binlog与position信息，则不会加载全表数据，从当前最新的一个binlog文件开始同步数据。
+#fd.load.history.data=true时， fd.mysql.gtid.enable=true时，如果获取不到gtid信息，则会加载全表数据。
+#fd.load.history.data=false时， fd.mysql.gtid.enable=true时，如果获取不到gtid信息，则不会加载全表数据，从当前最新的一个gtid位置开始同步数据。
+fd.load.history.data=true
+
+#http服务端监控信息，可以在浏览器当中看到当前服务数据同步的进度。
+fd.http.server.bind.host=127.0.0.1
+fd.http.server.port=8081
+
+#true在JSON数据中,不增加TABLE_NAME，DATABASE_NAME，binlogfile,position,gtid信息。
+fd.replica.ignore.meta.data.name=true
+
+
 
 
 2.2、redis配置文件redis.conf

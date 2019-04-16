@@ -20,34 +20,37 @@ public class ForrestDataDestStdout extends ForrestDataAbstractDestination implem
 
 	@Override
 	public boolean deliverDest(List<Map<String, Object>> rowResultList) {
-		String binLongFileName, binlogPosition;
-		// try {
-		// Thread.sleep(3 * 1000);
-		// } catch (InterruptedException e) {
-		// e.printStackTrace();
-		// }
+		String binLongFileName = null, binlogPosition = null, sqlType = null;
+		Map<String, String> gtid = null;
 		for (Map<String, Object> row : rowResultList) {
 			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
-			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
-				this.flushMetaData(row);
-				if (config.getGtidEnable()) {
-					this.saveBinlogPos(binLongFileName, binlogPosition,
-							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-				} else {
-					this.saveBinlogPos(binLongFileName, binlogPosition, null);
-				}
-				continue;
-			}
-			System.out.println(this.getJsonStringFromMap(row));
+			sqlType = ((String) row.get(ForrestDataConfig.metaSqltypeName));
+
 			if (config.getGtidEnable()) {
-				this.saveBinlogPos(binLongFileName, binlogPosition,
-						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-			} else {
-				this.saveBinlogPos(binLongFileName, binlogPosition, null);
+				gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
 			}
 
+			if (sqlType.equals("DDL")) {
+				this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
+				continue;
+			}
+
+			// 删除meta data info
+			if (ForrestDataConfig.ignoreMetaDataName) {
+				this.removeMetadataData(row);
+			}
+
+			System.out.println(this.getJsonStringFromMap(row));
 		}
+		
+
+		/*
+		 *delete range，update range,insert multi,共用一个binlog posistion, 在for循环中持久化position信息，可能会导致数据丢失。在for循环外持久化position信息，可能会导致数据重复。
+		 *
+		 */
+		this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
+
 		return true;
 	}
 }

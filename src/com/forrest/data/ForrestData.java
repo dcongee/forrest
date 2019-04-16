@@ -17,6 +17,7 @@ import com.forrest.data.config.ForrestDataConfig;
 import com.forrest.data.dest.ForrestDataDestination;
 import com.forrest.data.dest.impl.ForrestDataDestElasticSearch;
 import com.forrest.data.dest.impl.ForrestDataDestFile;
+import com.forrest.data.dest.impl.ForrestDataDestKafka;
 import com.forrest.data.dest.impl.ForrestDataDestRabbitMQ;
 import com.forrest.data.dest.impl.ForrestDataDestRedis;
 import com.forrest.data.dest.impl.ForrestDataDestStdout;
@@ -62,7 +63,11 @@ public class ForrestData {
 			client.setGtidSet(gtid.toString());
 			rowResult.setGtidMap(gtidMap);
 		} else {
-			client.setGtidSet(config.getGetServerUUID() + ":1-1");
+
+			// client.setGtidSet(config.getGetServerUUID() + ":1-1");
+			logger.warn(
+					"master Executed_Gtid_Set is empty. set default gtid = " + ForrestDataConfig.defaultGTID + ":1-1");
+			client.setGtidSet(ForrestDataConfig.defaultGTID + ":1-1");
 		}
 	}
 
@@ -88,7 +93,8 @@ public class ForrestData {
 					case FORMAT_DESCRIPTION:
 						FormatDescriptionEventData formatData = (FormatDescriptionEventData) event.getData();
 						logger.info("Server version:" + formatData.getServerVersion() + ". Binlog version: "
-								+ formatData.getBinlogVersion());
+								+ formatData.getBinlogVersion() + ". binary log file: " + client.getBinlogFilename()
+								+ ". binary log position: " + client.getBinlogPosition());
 						rowResult.setBinLogFile(client.getBinlogFilename());
 						rowResult.setBinLogPos(client.getBinlogPosition());
 						// if (config.getGtidEnable()) {
@@ -116,6 +122,10 @@ public class ForrestData {
 									e.printStackTrace();
 								}
 							}
+
+							// 重新加载表名称，字段名称，字段顺序
+							config.getMetaDataInfo();
+
 						}
 
 						break;
@@ -223,7 +233,12 @@ public class ForrestData {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
-		if (!ForrestDataConfig.filterMap.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
+
+		String databaseName = rowResult.getDatabaseName();
+		String tableName = rowResult.getTableName();
+
+		String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+		if (!ForrestDataConfig.filterMap.containsKey(tableKey)) {
 			return null;
 		}
 		WriteRowsEventData writeData = (WriteRowsEventData) event.getData();
@@ -237,8 +252,8 @@ public class ForrestData {
 		for (Serializable[] s : rows) {
 			Map<String, Object> rowMap = new HashMap<String, Object>();
 			rowMap.put(ForrestDataConfig.metaSqltypeName, "INSERT");
-			rowMap.put(ForrestDataConfig.metaDatabaseName, rowResult.getDatabaseName());
-			rowMap.put(ForrestDataConfig.metaTableName, rowResult.getTableName());
+			rowMap.put(ForrestDataConfig.metaDatabaseName, databaseName);
+			rowMap.put(ForrestDataConfig.metaTableName, tableName);
 			rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 																											// pos点
 			rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
@@ -250,9 +265,16 @@ public class ForrestData {
 			for (int i = 0; i < s.length; i++) {
 				String columnName = null;
 				if (columnSet.get(i)) {
-					String key = ForrestDataUtil.getMetaDataMapKey(rowResult.getDatabaseName(),
-							rowResult.getTableName(), i + 1);
+					String key = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName, i + 1);
 					columnName = ForrestDataConfig.sourceMySQLMetaDataMap.get(key);
+
+					// ignore table column
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableKey)) {
+						if (ForrestDataConfig.ignoreTableColumnMap.get(tableKey).contains(columnName)) {
+							continue;
+						}
+					}
+
 				}
 				String columnValue = null;
 				if (s[i] instanceof byte[]) {
@@ -274,8 +296,13 @@ public class ForrestData {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
-		if (!ForrestDataConfig.doUpdateData || !ForrestDataConfig.filterMap
-				.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
+
+		String databaseName = rowResult.getDatabaseName();
+		String tableName = rowResult.getTableName();
+
+		String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+
+		if (!ForrestDataConfig.doUpdateData || !ForrestDataConfig.filterMap.containsKey(tableKey)) {
 			return null;
 		}
 		UpdateRowsEventData updateData = (UpdateRowsEventData) event.getData();
@@ -287,8 +314,8 @@ public class ForrestData {
 			Map<String, String> afterMap = new HashMap<String, String>();
 			Map<String, String> beforMap = new HashMap<String, String>();
 			rowMap.put(ForrestDataConfig.metaSqltypeName, "UPDATE");
-			rowMap.put(ForrestDataConfig.metaDatabaseName, rowResult.getDatabaseName());
-			rowMap.put(ForrestDataConfig.metaTableName, rowResult.getTableName());
+			rowMap.put(ForrestDataConfig.metaDatabaseName, databaseName);
+			rowMap.put(ForrestDataConfig.metaTableName, tableName);
 			rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 			rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
 			if (gtidEnable) {
@@ -301,9 +328,14 @@ public class ForrestData {
 			for (int i = 0; i < beforValue.length; i++) {
 				String columnName = null;
 				if (columnSet.get(i)) {
-					String key = ForrestDataUtil.getMetaDataMapKey(rowResult.getDatabaseName(),
-							rowResult.getTableName(), i + 1);
+					String key = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName, i + 1);
 					columnName = ForrestDataConfig.sourceMySQLMetaDataMap.get(key);
+
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableKey)) { // ignore table column
+						if (ForrestDataConfig.ignoreTableColumnMap.get(tableKey).contains(columnName)) {
+							continue;
+						}
+					}
 				}
 				String columnValue = null;
 				if (beforValue[i] instanceof byte[]) {
@@ -338,8 +370,12 @@ public class ForrestData {
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 
-		if (!ForrestDataConfig.doDeleteData || !ForrestDataConfig.filterMap
-				.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
+		String databaseName = rowResult.getDatabaseName();
+		String tableName = rowResult.getTableName();
+
+		String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+
+		if (!ForrestDataConfig.doDeleteData || !ForrestDataConfig.filterMap.containsKey(tableKey)) {
 			return null;
 		}
 		DeleteRowsEventData deleteData = (DeleteRowsEventData) event.getData();
@@ -349,8 +385,8 @@ public class ForrestData {
 		for (Serializable[] s : deleteRows) {
 			Map<String, Object> rowMap = new HashMap<String, Object>();
 			rowMap.put(ForrestDataConfig.metaSqltypeName, "DELETE");
-			rowMap.put(ForrestDataConfig.metaDatabaseName, rowResult.getDatabaseName());
-			rowMap.put(ForrestDataConfig.metaTableName, rowResult.getTableName());
+			rowMap.put(ForrestDataConfig.metaDatabaseName, databaseName);
+			rowMap.put(ForrestDataConfig.metaTableName, tableName);
 			rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 			rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
 			if (gtidEnable) {
@@ -361,10 +397,17 @@ public class ForrestData {
 			for (int i = 0; i < s.length; i++) {
 				String columnName = null;
 				if (columnSet.get(i)) {
-					String key = ForrestDataUtil.getMetaDataMapKey(rowResult.getDatabaseName(),
-							rowResult.getTableName(), i + 1);
+					String key = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName, i + 1);
 					columnName = ForrestDataConfig.sourceMySQLMetaDataMap.get(key);
+
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableKey)) { // ignore table column
+						if (ForrestDataConfig.ignoreTableColumnMap.get(tableKey).contains(columnName)) {
+							continue;
+						}
+					}
+
 				}
+
 				String columnValue = null;
 				if (s[i] instanceof byte[]) {
 					// 处理text,blob类型
@@ -412,7 +455,6 @@ public class ForrestData {
 					try {
 						this.sleep(100);
 					} catch (InterruptedException e) {
-						// TODO Auto-generated catch block
 						e.printStackTrace();
 					}
 				}
@@ -487,6 +529,9 @@ public class ForrestData {
 			break;
 		case "ELASTICSEARCH":
 			dest = new ForrestDataDestElasticSearch(config, forrestMonitor);
+			break;
+		case "KAFKA":
+			dest = new ForrestDataDestKafka(config, forrestMonitor);
 			break;
 		default:
 			logger.error("unknow fd.ds.type=" + config.getDsType());

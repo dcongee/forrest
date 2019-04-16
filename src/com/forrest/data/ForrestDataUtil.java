@@ -104,23 +104,23 @@ public class ForrestDataUtil {
 		return str;
 	}
 
-	public static String getMetaDataMapKey(String table_schema, String table_name, int ORDINAL_POSITION) {
-		if (table_schema == null || table_name == null) {
+	public static String getMetaDataMapKey(String schemaName, String tableName, int ordinalPosition) {
+		if (schemaName == null || tableName == null) {
 			logger.error("Error: meta data info must be not null");
 			System.exit(1);
 		}
 		StringBuffer key = new StringBuffer();
-		key.append(table_schema).append(".").append(table_name).append(".").append(ORDINAL_POSITION);
+		key.append(schemaName).append(".").append(tableName).append(".").append(ordinalPosition);
 		return key.toString();
 	}
 
-	public static String getMetaDataMapKey(String table_schema, String table_name) {
-		if (table_schema == null || table_name == null) {
+	public static String getMetaDataMapKey(String schemaName, String tableName) {
+		if (schemaName == null || tableName == null) {
 			logger.error("Error: meta data info must be not null");
 			System.exit(1);
 		}
 		StringBuffer key = new StringBuffer();
-		key.append(table_schema).append(".").append(table_name);
+		key.append(schemaName).append(".").append(tableName);
 		return key.toString();
 	}
 

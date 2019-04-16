@@ -149,12 +149,21 @@ public class ForrestLoadHistoryData {
 				config.setBinlogFileName(rs.getString("File"));
 				config.setBinlogPostion(rs.getLong("Position"));
 				if (config.getGtidEnable()) {
-					String[] gtidSet = rs.getString("Executed_Gtid_Set").replaceAll("\n", "").split(",");
-					for (String gtidStr : gtidSet) {
-						gtidMap.put(gtidStr.split(":")[0], gtidStr.split(":")[1]);
+					String gtidSetStr = rs.getString("Executed_Gtid_Set");
+					if (gtidSetStr.trim().length() > 0) {
+						String[] gtidSet = gtidSetStr.replaceAll("\n", "").split(",");
+						for (String gtidStr : gtidSet) {
+							gtidMap.put(gtidStr.split(":")[0], gtidStr.split(":")[1]);
+						}
+					} else {
+						logger.error(
+								"Executed_Gtid_Set is empty,maybe mysql server has executed SQL: \"reset master\". If you want to skip this situation, execute at least one transaction on the mysql database and do not execute the \"reset master\" statement.");
+						config.close(con, ps, rs);
+						System.exit(1);
 					}
 				}
 			}
+
 			config.setGtidMap(gtidMap);
 			if (config.getGtidEnable()) {
 				logger.info("current binlog postion:" + config.getBinlogFileName() + ":" + config.getBinlogPostion()
@@ -217,34 +226,31 @@ public class ForrestLoadHistoryData {
 				rs = ps.executeQuery();
 
 				while (rs.next()) {
+					String columnName = rs.getString("Field").toUpperCase();
+
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(entry.getKey())) { // ignore table column
+						if (ForrestDataConfig.ignoreTableColumnMap.get(entry.getKey()).contains(columnName)) {
+							continue;
+						}
+					}
 					tableColumnSet.add(rs.getString("Field").toUpperCase());
 				}
 				config.close(ps);
 				config.close(rs);
 
-				sql = "select * from " + entry.getKey();
+				sql = "SELECT * FROM " + entry.getKey();
 				ps = con.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
 				ps.setFetchSize(Integer.MIN_VALUE);
 				// ps.setFetchSize(5);
 				rs = ps.executeQuery();
 				List<Map<String, Object>> rowList = new ArrayList<Map<String, Object>>();
 				while (rs.next()) {
-
 					Map<String, Object> rowMap = new HashMap<String, Object>();
 					for (String columnName : tableColumnSet) {
 						String columnValue = rs.getString(columnName);
 						rowMap.put(columnName, columnValue);
-
-						// if (entry.getKey().equals("WUHP.T5")) {
-						// System.out.println(columnName + " " + columnValue);
-						// }
-
-						// int columnIndex = rs.findColumn(columnName);
-						// System.out.println(rs.getMetaData().getColumnTypeName(columnIndex));
-						// if (columnName.toLowerCase().equals("t_date")) {
-						// System.out.println(columnValue);
-						// }
 					}
+
 					rowMap.put(ForrestDataConfig.metaBinLogFileName, config.getBinlogFileName());
 					rowMap.put(ForrestDataConfig.metaBinlogPositionName, binlogPostion);
 					rowMap.put(ForrestDataConfig.metaDatabaseName, databaseTableKeys[0]);
@@ -253,6 +259,11 @@ public class ForrestLoadHistoryData {
 					if (config.getGtidEnable()) {
 						rowMap.put(ForrestDataConfig.metaGTIDName, config.getGtidMap());
 					}
+
+					// if (rowMap.size() == 0) {
+					// logger.warn(entry.getKey() + " all columns has ignored.");
+					// break;
+					// }
 
 					rowList.add(rowMap);
 					if (rowList.size() == 100) {
@@ -265,6 +276,9 @@ public class ForrestLoadHistoryData {
 					}
 				}
 
+				config.close(ps);
+				config.close(rs);
+
 				try {
 					if (rowList.size() != 0) {
 						queue.put(rowList);
@@ -273,6 +287,7 @@ public class ForrestLoadHistoryData {
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
+
 				sql = "ROLLBACK TO SAVEPOINT sp";
 				ps = con.prepareStatement(sql); // 释放表DDL锁
 				ps.execute();

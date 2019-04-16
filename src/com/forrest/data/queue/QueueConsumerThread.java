@@ -36,6 +36,7 @@ public class QueueConsumerThread extends Thread implements Runnable {
 				}
 				// System.out.println(this.currentThread().getState());
 			} catch (InterruptedException e) {
+				e.printStackTrace();
 				logger.error("consumer error: " + e.getMessage());
 			}
 		}

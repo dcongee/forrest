@@ -8,13 +8,6 @@ import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Calendar;
 
-/**
- * @ClassName: MySQLMessage
- * @Description: MySQL数据包基本格式
- * @author liuhuanting
- * @date 2017年8月29日 上午10:49:26
- * 
- */
 public class MySQLMessage {
 	public static final long NULL_LENGTH = -1;
 	public static final byte[] EMPTY_BYTES = new byte[0];

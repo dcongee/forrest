@@ -11,11 +11,14 @@ import org.apache.log4j.Logger;
 import com.forrest.data.config.ForrestDataConfig;
 import com.forrest.data.dest.ForrestDataAbstractDestination;
 import com.forrest.data.dest.ForrestDataDestination;
+import com.forrest.data.dest.listen.RabbitMQRecoveryListener;
+import com.forrest.data.dest.listen.RabbitMQShutdownListener;
 import com.forrest.monitor.ForrestMonitor;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.MessageProperties;
+import com.rabbitmq.client.Recoverable;
 
 public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination implements ForrestDataDestination {
 	private static Logger logger = Logger.getLogger(ForrestDataDestRabbitMQ.class);
@@ -30,6 +33,7 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 	private boolean exchangeDurable;
 	private boolean queueDurable;
 	private Channel channel;
+	private String virtualHost;
 
 	public ForrestDataDestRabbitMQ(String rabbitMQHost, int rabbitMQPort, String rabbitMQUser, String rabbitMQPasswd,
 			String queueName) {
@@ -64,6 +68,7 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 			this.queueName = properties.getProperty("fd.ds.rabbitmq.queue.name").trim();
 			this.exchangeDurable = Boolean.valueOf(properties.getProperty("fd.ds.rabbitmq.exchange.durable").trim());
 			this.queueDurable = Boolean.valueOf(properties.getProperty("fd.ds.rabbitmq.queue.durable").trim());
+			this.virtualHost = properties.getProperty("fd.ds.rabbitmq.virtual.host").trim();
 
 			this.forrestMonitor.getMonitorMap().put("rabbitmq_host", rabbitMQHost);
 			this.forrestMonitor.getMonitorMap().put("rabbitmq_port", String.valueOf(rabbitMQPort));
@@ -74,6 +79,8 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 			this.forrestMonitor.getMonitorMap().put("rabbitmq_queuename", queueName);
 			this.forrestMonitor.getMonitorMap().put("rabbitmq_exchangedurable", String.valueOf(exchangeDurable));
 			this.forrestMonitor.getMonitorMap().put("rabbitmq_queuedurable", String.valueOf(queueDurable));
+			this.forrestMonitor.getMonitorMap().put("rabbitmq_virtual_host",
+					virtualHost.length() == 0 ? "/" : virtualHost);
 
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -96,8 +103,20 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 			factory.setPort(this.rabbitMQPort);
 			factory.setUsername(rabbitMQUser);
 			factory.setPassword(rabbitMQPasswd);
+			if (this.virtualHost.length() > 0) {
+				factory.setVirtualHost(this.virtualHost);
+			}
+			factory.setAutomaticRecoveryEnabled(true);
+
 			Connection connection = factory.newConnection();
+			connection.addShutdownListener(new RabbitMQShutdownListener());
+			((Recoverable) connection).addRecoveryListener(new RabbitMQRecoveryListener());
+
 			this.channel = connection.createChannel();
+
+			this.channel.addShutdownListener(new RabbitMQShutdownListener());
+			((Recoverable) this.channel).addRecoveryListener(new RabbitMQRecoveryListener());
+
 			this.channel.exchangeDeclare(this.exchangeName, this.exchangeType, exchangeDurable);
 			// DeclareOk okStr = channel.queueDeclarePassive(queueName); // 判断队列是否存在。
 			this.channel.queueDeclare(this.queueName, this.queueDurable, false, false, null);
@@ -117,36 +136,44 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 		// TODO Auto-generated method stub
 		String binLongFileName = null;
 		String binlogPosition = null;
+		String sqlType = null;
+		Map<String, String> gtid = null;
+
 		for (Map<String, Object> row : rowResultList) {
 			this.deliverTryTimes = 0;
 			this.deliverOK = false;
 
 			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
-			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
-				this.flushMetaData(row);
-				if (config.getGtidEnable()) {
-					this.saveBinlogPos(binLongFileName, binlogPosition,
-							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-				} else {
-					this.saveBinlogPos(binLongFileName, binlogPosition, null);
-				}
+			sqlType = ((String) row.get(ForrestDataConfig.metaSqltypeName));
+
+			if (config.getGtidEnable()) {
+				gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
+			}
+
+			if (sqlType.equals("DDL")) {
+				this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 				continue;
 			}
-			// channel.basicPublish(this.exchangeName, this.routingKeyName,
-			// MessageProperties.PERSISTENT_TEXT_PLAIN,
-			// this.getByteArrayFromMapJson(row));
+
+			// 删除meta data info
+			if (ForrestDataConfig.ignoreMetaDataName) {
+				this.removeMetadataData(row);
+			}
+
 			while (!deliverOK) {
 				deliverOK = this.deliver(row);
 				this.isWait();
 			}
-			if (config.getGtidEnable()) {
-				this.saveBinlogPos(binLongFileName, binlogPosition,
-						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-			} else {
-				this.saveBinlogPos(binLongFileName, binlogPosition, null);
-			}
+
 		}
+		/*
+		 * delete range，update range,insert multi,共用一个binlog posistion,
+		 * 在for循环中持久化position信息，可能会导致数据丢失。在for循环外持久化position信息，可能会导致数据重复。
+		 *
+		 */
+		this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
+
 		return true;
 	}
 
@@ -154,9 +181,10 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 		try {
 			channel.basicPublish(this.exchangeName, this.routingKeyName, MessageProperties.PERSISTENT_TEXT_PLAIN,
 					this.getByteArrayFromMapJson(row));
-		} catch (IOException e) {
+		} catch (Exception e) { // 必须捕获Expcetion的异常，不能是IOException，否则rabbitmq框架中抛出的AlreadyClosedException捕获不到。
+			logger.error("publish message failed: " + row);
+			logger.error(e.getMessage());
 			e.printStackTrace();
-			logger.error("rabbitmq deliver failed: " + e.getMessage());
 			return false;
 		}
 		return true;

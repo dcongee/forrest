@@ -4,10 +4,10 @@
 	<classpathentry kind="src" path="src"/>
 	<classpathentry kind="lib" path="conf"/>
 	<classpathentry kind="lib" path="logs"/>
-	<classpathentry kind="lib" path="lib/fastjson-1.2.47.jar"/>
+	<classpathentry kind="lib" path="lib/fastjson-1.2.47.jar" sourcepath="C:/Users/wuhp/.m2/repository/com/alibaba/fastjson/1.2.47/fastjson-1.2.47-sources.jar"/>
 	<classpathentry kind="lib" path="lib/jedis-2.6.0.jar"/>
 	<classpathentry kind="lib" path="lib/commons-pool2-2.6.0.jar"/>
-	<classpathentry kind="lib" path="lib/amqp-client-5.3.0.jar"/>
+	<classpathentry kind="lib" path="lib/amqp-client-5.3.0.jar" sourcepath="D:/RabbitMQ/amqp-client-5.3.0-sources.jar"/>
 	<classpathentry kind="lib" path="lib/log4j-1.2.12.jar"/>
 	<classpathentry kind="lib" path="lib/slf4j-api-1.7.25.jar"/>
 	<classpathentry kind="lib" path="lib/transport-5.5.2.jar" sourcepath="C:/Users/wuhp/.m2/repository/org/elasticsearch/client/transport/5.5.2/transport-5.5.2-sources.jar"/>
@@ -34,5 +34,8 @@
 	<classpathentry kind="lib" path="lib/netty-all-4.1.30.Final.jar" sourcepath="D:/java/netty-4.1.30.Final/netty-4.1.30.Final/jar/all-in-one/netty-all-4.1.30.Final-sources.jar"/>
 	<classpathentry kind="lib" path="lib/netty-3.10.6.Final.jar"/>
 	<classpathentry kind="lib" path="lib/transport-netty4-client-5.5.2.jar"/>
+	<classpathentry kind="lib" path="lib/hbase-client-2.1.2.jar"/>
+	<classpathentry kind="lib" path="lib/kafka_2.12-1.0.0.jar"/>
+	<classpathentry kind="lib" path="lib/kafka-clients-1.0.0.jar" sourcepath="C:/Users/wuhp/.m2/repository/org/apache/kafka/kafka-clients/1.0.0/kafka-clients-1.0.0-sources.jar"/>
 	<classpathentry kind="output" path="classes"/>
 </classpath>

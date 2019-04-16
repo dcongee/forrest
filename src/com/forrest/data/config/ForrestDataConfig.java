@@ -11,9 +11,13 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Properties;
+import java.util.Set;
 
 import org.apache.log4j.Logger;
 
@@ -61,12 +65,17 @@ public class ForrestDataConfig {
 	public static boolean doUpdateData = false;
 	public static boolean doDeleteData = false;
 
+	public static boolean ignoreMetaDataName = true;
+
+	public static String defaultGTID = "643ee4c6-3c45-11e9-9d30-000c29960a6c";
+
 	public static String updateBeforName = "BEFOR_VALUE";
 	public static String updateAfterName = "AFTER_VALUE";
 
 	public static Map<String, String> sourceMySQLMetaDataMap = new HashMap<String, String>();
 	public static Map<String, String> filterMap = new HashMap<String, String>();
 	public static Map<String, List<String>> tablePrimary = new HashMap<String, List<String>>();
+	public static Map<String, Set<String>> ignoreTableColumnMap = new HashMap<String, Set<String>>();
 
 	public ForrestDataConfig() {
 
@@ -81,8 +90,8 @@ public class ForrestDataConfig {
 		}
 		// &noDatetimeStringSync=true 可以将0000-00-00的日期转换成string，但毫秒与微秒会出现乱码
 		// &zeroDateTimeBehavior=convertToNull
-		//useCursorFetch=true&
-		//useServerPreparedStmts=true&cachePrepStmts=true&allowMultiQueries=true
+		// useCursorFetch=true&
+		// useServerPreparedStmts=true&cachePrepStmts=true&allowMultiQueries=true
 
 		try {
 			conn = DriverManager.getConnection("jdbc:mysql://" + this.mysqlHost + ":" + this.mysqlPort + "/"
@@ -162,7 +171,7 @@ public class ForrestDataConfig {
 	}
 
 	/**
-	 * 得到源mysql需要同步的所有meta data
+	 * 得到源mysql需要同步的所有meta data:库名，表名，字段名称，字段顺序
 	 * 
 	 * @return
 	 */
@@ -202,9 +211,19 @@ public class ForrestDataConfig {
 				String key = ForrestDataUtil.getMetaDataMapKey(tableSchema, tableName, rs.getInt("ORDINAL_POSITION"));
 				String value = rs.getString("column_name").toUpperCase();
 				sourceMySQLMetaDataMap.put(key, value);
+
+				String tableKey = ForrestDataUtil.getMetaDataMapKey(tableSchema, tableName);
+
+				if (ignoreTableColumnMap.containsKey(tableKey)) { // 如果表的所有字段都被过滤，则该表也被过滤。
+					if (ignoreTableColumnMap.get(tableKey).contains(value)) {
+						continue;
+					}
+				}
+
 				filterMap.put(ForrestDataUtil.getMetaDataMapKey(tableSchema, tableName), "1");
 			}
 		} catch (SQLException e) {
+			logger.error("get mysql meta data failed.");
 			logger.error(e.getMessage());
 			System.exit(1);
 		} finally {
@@ -213,56 +232,6 @@ public class ForrestDataConfig {
 		return sourceMySQLMetaDataMap;
 	}
 
-	/**
-	 * 得到源mysql需要同步的所有meta data
-	 * 
-	 * @return
-	 */
-	Map<String, String> getMetaDataInfo(String[] relicaDBTables) {
-		// grant replication slave,replication client,select on *.* to 'qktx_repl'@'%'
-		// identified by 'qktx_repl';
-		Connection con = this.getConnection();
-		PreparedStatement ps = null;
-		ResultSet rs = null;
-		StringBuffer sql = new StringBuffer();
-		sql.append(
-				"select upper(table_Schema) as table_schema,upper(table_name) as table_name,upper(column_name) as column_name,ORDINAL_POSITION from information_Schema.columns where ( 1=1 ) ");
-		if (relicaDBTables.length != 0) {
-			for (int i = 0; i < relicaDBTables.length; i++) {
-				if (i == 0) {
-					sql.append(" and  concat(table_schema,'.',table_name)  like '").append(relicaDBTables[i]);
-				} else if (i == relicaDBTables.length - 1) {
-					sql.append("' or  concat(table_schema,'.',table_name)  like  '").append(relicaDBTables[i]);
-				} else {
-					sql.append("' or concat(table_schema,'.',table_name)  like '").append(relicaDBTables[i]);
-				}
-				sql.append("'");
-			}
-		}
-
-		try {
-			ps = con.prepareStatement(sql.toString());
-			// ps.setString(1, DBNAME);
-			rs = ps.executeQuery();
-			if (sourceMySQLMetaDataMap != null) {
-				sourceMySQLMetaDataMap = new HashMap<String, String>();
-			}
-			while (rs.next()) {
-				String key = ForrestDataUtil.getMetaDataMapKey(rs.getString("table_schema"), rs.getString("table_name"),
-						rs.getInt("ORDINAL_POSITION"));
-				String value = rs.getString("column_name");
-				sourceMySQLMetaDataMap.put(key, value);
-
-				key = ForrestDataUtil.getMetaDataMapKey(rs.getString("table_schema"), rs.getString("table_name"));
-				filterMap.put(key, value);
-			}
-		} catch (SQLException e) {
-			e.printStackTrace();
-		} finally {
-			close(con, ps, rs);
-		}
-		return sourceMySQLMetaDataMap;
-	}
 
 	/**
 	 * 从information_Schema.KEY_COLUMN_USAGE表中获取各个表的主键，联合主键，按字段进行排序
@@ -311,6 +280,7 @@ public class ForrestDataConfig {
 				}
 			}
 		} catch (SQLException e) {
+			logger.error("get table primary key failed.");
 			logger.error(e.getMessage());
 			System.exit(1);
 		} finally {
@@ -320,6 +290,7 @@ public class ForrestDataConfig {
 
 	public void initConfig() {
 		Properties properties = new Properties();
+		logger.debug("load config file forrest.conf");
 		InputStream in = ForrestDataConfig.class.getClassLoader().getResourceAsStream("forrest.conf");
 		try {
 			properties.load(in);
@@ -357,7 +328,9 @@ public class ForrestDataConfig {
 			in.close();
 
 			mysqlServerCheck();
+
 			File binlogCacheFile = new File(this.binlogCacheFilePath);
+			logger.debug("read cache file:" + binlogCacheFile.getAbsolutePath());
 			BinlogPosProcessor.randomAccessFile = new RandomAccessFile(binlogCacheFile, "rw");
 			if (binlogCacheFile.exists()) {
 				String str = BinlogPosProcessor.randomAccessFile.readLine();
@@ -371,7 +344,7 @@ public class ForrestDataConfig {
 					this.binlogFileName = str.split(" ")[0];
 					this.binlogPostion = Long.valueOf(str.split(" ")[1].trim());
 					if (this.gtidEnable) {
-						if (str.length() == 3) {
+						if (str.split(" ").length == 3) {
 							gtidMap = new HashMap<String, String>();
 							String gtid = str.split(" ")[2];
 							String[] gtidSet = gtid.split(",");
@@ -397,15 +370,26 @@ public class ForrestDataConfig {
 		String str = properties.getProperty("fd.replica.do.db.table").trim();
 		doUpdateData = properties.getProperty("fd.replica.do.update.data").trim().equals("true") ? true : false;
 		doDeleteData = properties.getProperty("fd.replica.do.delete.data").trim().equals("true") ? true : false;
+
+		String ignoreColumns = properties.getProperty("fd.replica.ignore.table.column").trim();
+
+		ignoreMetaDataName = properties.getProperty("fd.replica.ignore.meta.data.name").trim().equals("true") ? true
+				: false;
 		updateBeforName = properties.getProperty("fd.result.data.update.beforname").trim();
 		updateAfterName = properties.getProperty("fd.result.data.update.aftername").trim();
 
 		httpServerPort = Integer.valueOf(properties.getProperty("fd.http.server.bind.port").trim());
 		httpServerHost = properties.getProperty("fd.http.server.bind.host").trim();
+		
+		logger.debug("forrest parameter loaded.");
 
+		initIgnoreTableColumn(ignoreColumns);
 		initDoDBTable(str);
+
 		getMetaDataInfo();
 		getTablePrimary();
+		logger.debug("init forrest config success.");
+
 	}
 
 	public String getGetServerUUID() {
@@ -441,36 +425,30 @@ public class ForrestDataConfig {
 		this.replicaDBTables = str.split(",");
 	}
 
-	public void loadData() {
-		Connection con = this.getConnection();
-		PreparedStatement ps = null;
-		ResultSet rs = null;
-		String sql = "select * from wuhp.text_test";
-		// String sql = "select * from qktx_db.hhz_task_user";
-
-		// Statement statement = null;
-		// statement=con.createStatement();
-
-		try {
-			con.setAutoCommit(false);
-			ps = con.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
-			ps.setFetchSize(Integer.MIN_VALUE);
-			// ps.setFetchSize(5);
-
-			rs = ps.executeQuery();
-
-			// System.out.println(rs.getFetchSize());
-			// System.out.println(rs.getRow());
-
-			while (rs.next()) {
-				System.out.println(rs.getString(1));
+	/**
+	 * wuhp.w.{id name test},wuhp.autotest.{name}
+	 */
+	public void initIgnoreTableColumn(String columnStr) {
+		logger.debug("load ignore table columns." + columnStr);
+		if (columnStr == null) {
+			return;
+		}
+		if (columnStr.length() == 0) {
+			return;
+		}
+		String[] columnsArr = columnStr.split(",");
+		for (String tableColumns : columnsArr) {
+			String[] columns = tableColumns.split("\\.");
+			String schemaName = columns[0].trim().toUpperCase();
+			String tableName = columns[1].trim().toUpperCase();
+			String cols = columns[2].trim().toUpperCase();
+			String key = ForrestDataUtil.getMetaDataMapKey(schemaName, tableName);
+			cols = cols.replace("{", "").replace("}", "");
+			Set<String> set = new HashSet<String>();
+			for (String c : cols.split(" ")) {
+				set.add(c.trim().toUpperCase());
 			}
-			con.commit();
-		} catch (SQLException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} finally {
-			this.close(con, ps, rs);
+			ignoreTableColumnMap.put(key, set);
 		}
 	}
 
@@ -629,7 +607,18 @@ public class ForrestDataConfig {
 	public static void main(String[] args) {
 		ForrestDataConfig config = new ForrestDataConfig();
 		config.initConfig();
-		config.loadData();
+		config.initIgnoreTableColumn("wuhp.w.{id        name     test},wuhp.autotest.{name}");
+		Map<String, Set<String>> str = ForrestDataConfig.ignoreTableColumnMap;
+
+		for (Entry<String, Set<String>> entry : str.entrySet()) {
+			Set<String> e = entry.getValue();
+			String schema = entry.getKey();
+			System.out.println("table=>" + schema);
+			Iterator<String> it = e.iterator();
+			while (it.hasNext()) {
+				System.out.println("columns:" + it.next());
+			}
+		}
 
 	}
 
@@ -639,15 +628,18 @@ public class ForrestDataConfig {
 	 */
 	public void mysqlServerCheck() {
 		// TODO Auto-generated method stub
+		logger.debug("check mysql server paremeters.");
 		Connection con = this.getConnection();
 		PreparedStatement ps = null;
 		ResultSet rs = null;
 		String gtidSQL = "show global variables like 'gtid_mode'";
 		String logBinSQL = "show global variables like 'log_bin'";
 		String rowFormatSQL = "show global variables like 'binlog_format'";
+		// String showMasterStatusSQL = "show master status";
 		String gtidMode = null;
 		String logBin = null;
 		String rowFormat = null;
+		// String executedGtidSet = null;
 		try {
 			if (this.gtidEnable) {
 				ps = con.prepareStatement(gtidSQL);
@@ -656,45 +648,45 @@ public class ForrestDataConfig {
 					gtidMode = rs.getString("value");
 				}
 				if (!gtidMode.toUpperCase().equals("ON")) {
-					logger.error("forrest gtid is enabled,but mysql server system variable gtid_mode is not on.");
+					logger.error("forrest gtid is enabled,but mysql server system variable gtid_mode is not enable.");
 					this.close(con, ps, rs);
 					System.exit(1);
 				} else {
 					this.close(ps);
 					this.close(ps);
 				}
-
-				ps = con.prepareStatement(logBinSQL);
-				rs = ps.executeQuery();
-				while (rs.next()) {
-					logBin = rs.getString("value");
-				}
-
-				if (!logBin.toUpperCase().equals("ON")) {
-					logger.error("mysql server system variable log_bin is not on.");
-					this.close(con, ps, rs);
-					System.exit(1);
-				} else {
-					this.close(ps);
-					this.close(ps);
-				}
-
-				ps = con.prepareStatement(rowFormatSQL);
-				rs = ps.executeQuery();
-				while (rs.next()) {
-					rowFormat = rs.getString("value");
-				}
-
-				if (!rowFormat.toUpperCase().equals("ROW")) {
-					logger.error("mysql server system variable binlog_format is not ROW.");
-					this.close(con, ps, rs);
-					System.exit(1);
-				} else {
-					this.close(ps);
-					this.close(ps);
-				}
-
 			}
+
+			ps = con.prepareStatement(logBinSQL);
+			rs = ps.executeQuery();
+			while (rs.next()) {
+				logBin = rs.getString("value");
+			}
+
+			if (!logBin.toUpperCase().equals("ON")) {
+				logger.error("mysql server system variable log_bin is not on.");
+				this.close(con, ps, rs);
+				System.exit(1);
+			} else {
+				this.close(ps);
+				this.close(ps);
+			}
+
+			ps = con.prepareStatement(rowFormatSQL);
+			rs = ps.executeQuery();
+			while (rs.next()) {
+				rowFormat = rs.getString("value");
+			}
+
+			if (!rowFormat.toUpperCase().equals("ROW")) {
+				logger.error("mysql server system variable binlog_format is not ROW.");
+				this.close(con, ps, rs);
+				System.exit(1);
+			} else {
+				this.close(ps);
+				this.close(ps);
+			}
+
 		} catch (SQLException e) {
 			logger.error("mysql system variable check failed,may be server is shutdown");
 			e.printStackTrace();

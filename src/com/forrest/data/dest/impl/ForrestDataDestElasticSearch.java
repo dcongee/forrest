@@ -96,36 +96,45 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 	public boolean deliverDest(List<Map<String, Object>> rowResultList) {
 		String binLongFileName = null;
 		String binlogPosition = null;
+		String databaseName = null;
+		String tableName = null;
+		String esIndex = null;
+		String esType = null;
+		String sqlType = null;
+		String esID = null;
+		Map<String, String> gtid = null;
+
 		for (Map<String, Object> row : rowResultList) {
 			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
+			sqlType = ((String) row.get(ForrestDataConfig.metaSqltypeName));
+			if (config.getGtidEnable()) {
+				gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
+			}
 
 			// DDL操作刷新表数据。
-			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
-				this.flushMetaData(row);
-				if (config.getGtidEnable()) {
-					this.saveBinlogPos(binLongFileName, binlogPosition,
-							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-				} else {
-					this.saveBinlogPos(binLongFileName, binlogPosition, null);
-				}
+			if (sqlType.equals("DDL")) {
+				this.reloadTablePrimary(row);
+				this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 				continue;
 			}
 
-			String databaseName = (String) row.get(ForrestDataConfig.metaDatabaseName);
-			String tableName = (String) row.get(ForrestDataConfig.metaTableName);
-			String esIndex = databaseName.toLowerCase();
-			String esType = tableName.toLowerCase();
+			databaseName = (String) row.get(ForrestDataConfig.metaDatabaseName);
+			tableName = (String) row.get(ForrestDataConfig.metaTableName);
+			esIndex = databaseName.toLowerCase();
+			esType = tableName.toLowerCase();
 
-			String sqlType = ((String) row.get(ForrestDataConfig.metaSqltypeName));
-			String esID = null;
+			// 删除meta data info
+			if (ForrestDataConfig.ignoreMetaDataName) {
+				this.removeMetadataData(row);
+			}
 
 			this.deliverTryTimes = 0;
 			this.deliverOK = false;
 			switch (sqlType) {
 			case "INSERT":
-				esID = this.getPrimaryKeyValueFromRow(row);
-				if (!checkPrimaryKey(esIndex, esType, esID, row)) // 如果表不存在主键，则忽略该数据。
+				esID = this.getPrimaryKeyValueFromRow(databaseName, tableName, row);
+				if (!checkPrimaryKey(esIndex, esType, esID, binLongFileName, binlogPosition, gtid, row)) // 如果表不存在主键，则忽略该数据。
 					continue;
 				while (!deliverOK) {
 					deliverOK = saveByID(esIndex, esType, esID, row);
@@ -134,13 +143,13 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 				break;
 			case "UPDATE":
 				while (!deliverOK) {
-					deliverOK = updateByID(esIndex, esType, esID, row);
+					deliverOK = updateByID(esIndex, esType, esID, binLongFileName, binlogPosition, gtid, row);
 					isWait();
 				}
 				break;
 			case "DELETE":
-				esID = this.getPrimaryKeyValueFromRow(row);
-				if (!checkPrimaryKey(esIndex, esType, esID, row))
+				esID = this.getPrimaryKeyValueFromRow(databaseName, tableName, row);
+				if (!checkPrimaryKey(esIndex, esType, esID, binLongFileName, binlogPosition, gtid, row))
 					continue;
 				while (!deliverOK) {
 					deliverOK = deleteByID(esIndex, esType, esID, row);
@@ -150,18 +159,14 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 			default:
 				break;
 			}
-			if (config.getGtidEnable()) {
-				this.saveBinlogPos(binLongFileName, binlogPosition,
-						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-			} else {
-				this.saveBinlogPos(binLongFileName, binlogPosition, null);
-			}
+			this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 		}
 		return true;
 	}
 
 	public boolean saveByID(String esIndex, String esType, String esID, Map<String, Object> row) {
 		try {
+
 			IndexResponse response = client.prepareIndex(esIndex, esType, esID).setSource(row).get();
 			// XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
 			// IndexRequestBuilder indexRequestBuilder = client.prepareIndex(esIndex,
@@ -178,27 +183,30 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 		return true;
 	}
 
-	public boolean updateByID(String esIndex, String esType, String esID, Map<String, Object> row) {
+	public boolean updateByID(String esIndex, String esType, String esID,
+			String binLongFileName, String binlogPosition, Map<String, String> gtid, Map<String, Object> row) {
 		Map<String, Object> beforMap = (Map<String, Object>) row.get("BEFOR_VALUE");
 		Map<String, Object> afterMap = (Map<String, Object>) row.get("AFTER_VALUE");
 
 		esID = this.getPrimaryKeyValueFromRow(esIndex.toUpperCase(), esType.toUpperCase(), beforMap);
-		if (!checkPrimaryKey(esIndex, esType, esID, row))
+		if (!checkPrimaryKey(esIndex, esType, esID, binLongFileName, binlogPosition, gtid, row))
 			return true;
 
 		String afterEsID = this.getPrimaryKeyValueFromRow(esIndex.toUpperCase(), esType.toUpperCase(), afterMap);
-		if (!checkPrimaryKey(esIndex, esType, esID, row))
+		if (!checkPrimaryKey(esIndex, esType, esID, binLongFileName, binlogPosition, gtid, row))
 			return true;
 
 		if (!deleteByID(esIndex, esType, esID, beforMap)) {
 			return false;
 		}
 
-		afterMap.put(ForrestDataConfig.metaDatabaseName, row.get(ForrestDataConfig.metaDatabaseName));
-		afterMap.put(ForrestDataConfig.metaTableName, row.get(ForrestDataConfig.metaTableName));
-		afterMap.put(ForrestDataConfig.metaBinLogFileName, row.get(ForrestDataConfig.metaBinLogFileName));
-		afterMap.put(ForrestDataConfig.metaBinlogPositionName, row.get(ForrestDataConfig.metaBinlogPositionName));
-		afterMap.put(ForrestDataConfig.metaSqltypeName, row.get(ForrestDataConfig.metaSqltypeName));
+		if (!ForrestDataConfig.ignoreMetaDataName) {
+			afterMap.put(ForrestDataConfig.metaDatabaseName, row.get(ForrestDataConfig.metaDatabaseName));
+			afterMap.put(ForrestDataConfig.metaTableName, row.get(ForrestDataConfig.metaTableName));
+			afterMap.put(ForrestDataConfig.metaBinLogFileName, row.get(ForrestDataConfig.metaBinLogFileName));
+			afterMap.put(ForrestDataConfig.metaBinlogPositionName, row.get(ForrestDataConfig.metaBinlogPositionName));
+			afterMap.put(ForrestDataConfig.metaSqltypeName, row.get(ForrestDataConfig.metaSqltypeName));
+		}
 
 		if (!saveByID(esIndex, esType, afterEsID, afterMap)) {
 			return false;
@@ -327,6 +335,14 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 		}
 	}
 
+	/**
+	 *
+	 * @param esIndex
+	 * @param esType
+	 * @param esID
+	 * @param row
+	 * @return
+	 */
 	public boolean checkPrimaryKey(String esIndex, String esType, String esID, Map<String, Object> row) {
 		if (null == esID) {
 			String binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
@@ -338,6 +354,27 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 			} else {
 				this.saveBinlogPos(binLongFileName, binlogPosition, null);
 			}
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * 
+	 * @param esIndex
+	 * @param esType
+	 * @param esID
+	 * @param binLongFileName
+	 * @param binlogPosition
+	 * @param gtid
+	 * @param row
+	 * @return
+	 */
+	public boolean checkPrimaryKey(String esIndex, String esType, String esID, String binLongFileName,
+			String binlogPosition, Map<String, String> gtid, Map<String, Object> row) {
+		if (null == esID) {
+			logger.warn("not found primary key in table " + esIndex + "." + esType + ",ignore this data: " + row);
+			this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 			return false;
 		}
 		return true;

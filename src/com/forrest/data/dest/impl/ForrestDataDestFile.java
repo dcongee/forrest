@@ -40,22 +40,44 @@ public class ForrestDataDestFile extends ForrestDataAbstractDestination implemen
 
 	@Override
 	public boolean deliverDest(List<Map<String, Object>> rowResultList) {
+
+		this.deliverTryTimes = 0;
+		this.deliverOK = false;
+
+		while (!deliverOK) {
+			deliverOK = this.deliver(rowResultList);
+			this.isWait();
+		}
+		return true;
+	}
+
+	public boolean deliver(List<Map<String, Object>> rowResultList) {
 		String binLongFileName = null;
 		String binlogPosition = null;
+		Map<String, String> gtid = null;
+		String sqlType = null;
+
 		for (Map<String, Object> row : rowResultList) {
 			binLongFileName = (String) row.get(ForrestDataConfig.metaBinLogFileName);
 			binlogPosition = (String) row.get(ForrestDataConfig.metaBinlogPositionName);
-			if (((String) row.get(ForrestDataConfig.metaSqltypeName)).equals("DDL")) {
-				this.flushMetaData(row);
-				if (config.getGtidEnable()) {
-					this.saveBinlogPos(binLongFileName, binlogPosition,
-							(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-				} else {
-					this.saveBinlogPos(binLongFileName, binlogPosition, null);
-				}
+			sqlType = ((String) row.get(ForrestDataConfig.metaSqltypeName));
+
+			if (config.getGtidEnable()) {
+				gtid = (Map<String, String>) row.get(ForrestDataConfig.metaGTIDName);
+			}
+
+			if (sqlType.equals("DDL")) {
+				this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 				continue;
 			}
+
+			// 删除meta data info
+			if (ForrestDataConfig.ignoreMetaDataName) {
+				this.removeMetadataData(row);
+			}
+
 			// System.out.println(JSON.toJSONString(row));
+
 			try {
 				// op.write(JSON.toJSONString(row));
 				op.write(this.getJsonStringFromMap(row));
@@ -67,13 +89,13 @@ public class ForrestDataDestFile extends ForrestDataAbstractDestination implemen
 				logger.error("file deliver exception: " + e.getMessage());
 				return false;
 			}
-			if (config.getGtidEnable()) {
-				this.saveBinlogPos(binLongFileName, binlogPosition,
-						(Map<String, String>) row.get(ForrestDataConfig.metaGTIDName));
-			} else {
-				this.saveBinlogPos(binLongFileName, binlogPosition, null);
-			}
 		}
+		/*
+		 * delete range，update range,insert multi,共用一个binlog posistion,
+		 * 在for循环中持久化position信息，可能会导致数据丢失。在for循环外持久化position信息，可能会导致数据重复。
+		 *
+		 */
+		this.saveBinlogPos(binLongFileName, binlogPosition, gtid);
 		return true;
 	}
 }

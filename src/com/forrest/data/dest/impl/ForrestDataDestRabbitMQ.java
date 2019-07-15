@@ -183,8 +183,7 @@ public class ForrestDataDestRabbitMQ extends ForrestDataAbstractDestination impl
 					this.getByteArrayFromMapJson(row));
 		} catch (Exception e) { // 必须捕获Expcetion的异常，不能是IOException，否则rabbitmq框架中抛出的AlreadyClosedException捕获不到。
 			logger.error("publish message failed: " + row);
-			logger.error(e.getMessage());
-			e.printStackTrace();
+			logger.error(e.getMessage(), e);
 			return false;
 		}
 		return true;

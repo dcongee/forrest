@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -183,8 +182,8 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 		return true;
 	}
 
-	public boolean updateByID(String esIndex, String esType, String esID,
-			String binLongFileName, String binlogPosition, Map<String, String> gtid, Map<String, Object> row) {
+	public boolean updateByID(String esIndex, String esType, String esID, String binLongFileName, String binlogPosition,
+			Map<String, String> gtid, Map<String, Object> row) {
 		Map<String, Object> beforMap = (Map<String, Object>) row.get("BEFOR_VALUE");
 		Map<String, Object> afterMap = (Map<String, Object>) row.get("AFTER_VALUE");
 
@@ -380,15 +379,15 @@ public class ForrestDataDestElasticSearch extends ForrestDataAbstractDestination
 		return true;
 	}
 
-	public void isWait() {
-		deliverTryTimes++;
-		if (deliverTryTimes > 10) { // 超过10次，就间隔一秒再重试，防止产生大量的日志，将磁盘刷满
-			try {
-				Thread.sleep(1000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-	}
+	// public void isWait() {
+	// deliverTryTimes++;
+	// if (deliverTryTimes > 10) { // 超过10次，就间隔一秒再重试，防止产生大量的日志，将磁盘刷满
+	// try {
+	// Thread.sleep(1000);
+	// } catch (InterruptedException e) {
+	// e.printStackTrace();
+	// }
+	// }
+	// }
 
 }

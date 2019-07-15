@@ -852,7 +852,7 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
 							connect(connectTimeout);
 						} catch (Exception ce) {
 							logger.warn("Failed to restore connection to " + hostname + ":" + port
-									+ ". Next attempt in " + keepAliveInterval + "ms");
+									+ ". Next attempt in " + keepAliveInterval + "ms", ce);
 						}
 					}
 				}

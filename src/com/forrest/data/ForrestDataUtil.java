@@ -124,12 +124,12 @@ public class ForrestDataUtil {
 		return key.toString();
 	}
 
-	public static String[] getDatabaseNameAndTableNameFromKey(String key) {
-		if (key == null) {
-			logger.error("Error: key must be not null");
+	public static String[] getDatabaseNameAndTableNameFromKey(String tableFullName) {
+		if (tableFullName == null) {
+			logger.error("Error: tableFullName must be not null");
 			System.exit(1);
 		}
-		String[] str = key.split("\\.");
+		String[] str = tableFullName.split("\\.");
 		return str;
 	}
 

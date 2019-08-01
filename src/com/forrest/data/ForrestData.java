@@ -97,8 +97,6 @@ public class ForrestData {
 								+ ". binary log position: " + client.getBinlogPosition());
 						rowResult.setBinLogFile(client.getBinlogFilename());
 						rowResult.setBinLogPos(client.getBinlogPosition());
-						// if (config.getGtidEnable()) {
-						// }
 						forrestMonitor.putReadBinlogInfo(rowResult.getBinLogFile(), rowResult.getBinLogPos(),
 								rowResult.getGtidMap());
 						break;
@@ -131,10 +129,22 @@ public class ForrestData {
 						break;
 					case TABLE_MAP:
 						TableMapEventData tableData = (TableMapEventData) event.getData();
+
+						// 若存在触发器,会同时连续多条table map事件的数据 ；
+						// 那么第一条table map中的表名称与库名称会被后续的table map中的表名称与库名称覆盖。导致数据出问题。
 						rowResult.setDatabaseName(tableData.getDatabase().toUpperCase());
 						rowResult.setTableName(tableData.getTable().toUpperCase());
-						if (!ForrestDataConfig.filterMap
-								.containsKey(rowResult.getDatabaseName() + "." + rowResult.getTableName())) {
+
+						// 接上面。因此，在rowresult中保存所有表的tableID。后续的INSERT、UPDATE、DELETE
+						// EVENT中，通过TABLEID来获取表名称。
+						Long tableID = tableData.getTableId();
+						String tableFullName = ForrestDataUtil.getMetaDataMapKey(rowResult.getDatabaseName(),
+								rowResult.getTableName());
+						if (!rowResult.getTableMap().containsKey(tableID)) {
+							rowResult.getTableMap().put(tableID, tableFullName);
+						}
+
+						if (!ForrestDataConfig.filterMap.containsKey(tableFullName)) {
 							break;
 						}
 						break;
@@ -234,14 +244,28 @@ public class ForrestData {
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 
-		String databaseName = rowResult.getDatabaseName();
-		String tableName = rowResult.getTableName();
+		// String databaseName = rowResult.getDatabaseName();
+		// String tableName = rowResult.getTableName();
 
-		String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
-		if (!ForrestDataConfig.filterMap.containsKey(tableKey)) {
+		// String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+		// if (!ForrestDataConfig.filterMap.containsKey(tableKey)) {
+		// return null;
+		// }
+
+		WriteRowsEventData writeData = (WriteRowsEventData) event.getData();
+
+		Long tableID = writeData.getTableId();
+		String tableFullName = rowResult.getTableMap().get(tableID);
+
+		if (!ForrestDataConfig.filterMap.containsKey(tableFullName)) {
 			return null;
 		}
-		WriteRowsEventData writeData = (WriteRowsEventData) event.getData();
+
+		String tableFullNameStr[] = ForrestDataUtil.getDatabaseNameAndTableNameFromKey(tableFullName);
+
+		String databaseName = tableFullNameStr[0];
+		String tableName = tableFullNameStr[1];
+
 		BitSet columnSet = writeData.getIncludedColumns();
 		List<Serializable[]> rows = writeData.getRows();
 		List<Map<String, Object>> insertResultList = new ArrayList<Map<String, Object>>();
@@ -269,8 +293,8 @@ public class ForrestData {
 					columnName = ForrestDataConfig.sourceMySQLMetaDataMap.get(key);
 
 					// ignore table column
-					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableKey)) {
-						if (ForrestDataConfig.ignoreTableColumnMap.get(tableKey).contains(columnName)) {
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableFullName)) {
+						if (ForrestDataConfig.ignoreTableColumnMap.get(tableFullName).contains(columnName)) {
 							continue;
 						}
 					}
@@ -297,15 +321,26 @@ public class ForrestData {
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 
-		String databaseName = rowResult.getDatabaseName();
-		String tableName = rowResult.getTableName();
+		// String databaseName = rowResult.getDatabaseName();
+		// String tableName = rowResult.getTableName();
+		//
+		// String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+		//
+		// if (!ForrestDataConfig.doUpdateData ||
+		// !ForrestDataConfig.filterMap.containsKey(tableKey)) {
+		// return null;
+		// }
 
-		String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
-
-		if (!ForrestDataConfig.doUpdateData || !ForrestDataConfig.filterMap.containsKey(tableKey)) {
+		UpdateRowsEventData updateData = (UpdateRowsEventData) event.getData();
+		Long tableID = updateData.getTableId();
+		String tableFullName = rowResult.getTableMap().get(tableID);
+		if (!ForrestDataConfig.filterMap.containsKey(tableFullName)) {
 			return null;
 		}
-		UpdateRowsEventData updateData = (UpdateRowsEventData) event.getData();
+		String tableFullNameStr[] = ForrestDataUtil.getDatabaseNameAndTableNameFromKey(tableFullName);
+		String databaseName = tableFullNameStr[0];
+		String tableName = tableFullNameStr[1];
+
 		columnSet = updateData.getIncludedColumns();
 		List<Map<String, Object>> updateResultList = new ArrayList<Map<String, Object>>();
 		List<Entry<Serializable[], Serializable[]>> updateRows = updateData.getRows();
@@ -331,8 +366,8 @@ public class ForrestData {
 					String key = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName, i + 1);
 					columnName = ForrestDataConfig.sourceMySQLMetaDataMap.get(key);
 
-					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableKey)) { // ignore table column
-						if (ForrestDataConfig.ignoreTableColumnMap.get(tableKey).contains(columnName)) {
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableFullName)) { // ignore table column
+						if (ForrestDataConfig.ignoreTableColumnMap.get(tableFullName).contains(columnName)) {
 							continue;
 						}
 					}
@@ -370,15 +405,27 @@ public class ForrestData {
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 
-		String databaseName = rowResult.getDatabaseName();
-		String tableName = rowResult.getTableName();
+		// String databaseName = rowResult.getDatabaseName();
+		// String tableName = rowResult.getTableName();
+		//
+		// String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+		//
+		// if (!ForrestDataConfig.doDeleteData ||
+		// !ForrestDataConfig.filterMap.containsKey(tableKey)) {
+		// return null;
+		// }
 
-		String tableKey = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName);
+		DeleteRowsEventData deleteData = (DeleteRowsEventData) event.getData();
 
-		if (!ForrestDataConfig.doDeleteData || !ForrestDataConfig.filterMap.containsKey(tableKey)) {
+		Long tableID = deleteData.getTableId();
+		String tableFullName = rowResult.getTableMap().get(tableID);
+		if (!ForrestDataConfig.filterMap.containsKey(tableFullName)) {
 			return null;
 		}
-		DeleteRowsEventData deleteData = (DeleteRowsEventData) event.getData();
+		String tableFullNameStr[] = ForrestDataUtil.getDatabaseNameAndTableNameFromKey(tableFullName);
+		String databaseName = tableFullNameStr[0];
+		String tableName = tableFullNameStr[1];
+
 		columnSet = deleteData.getIncludedColumns();
 		List<Serializable[]> deleteRows = deleteData.getRows();
 		List<Map<String, Object>> deleteResultList = new ArrayList<Map<String, Object>>();
@@ -400,8 +447,8 @@ public class ForrestData {
 					String key = ForrestDataUtil.getMetaDataMapKey(databaseName, tableName, i + 1);
 					columnName = ForrestDataConfig.sourceMySQLMetaDataMap.get(key);
 
-					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableKey)) { // ignore table column
-						if (ForrestDataConfig.ignoreTableColumnMap.get(tableKey).contains(columnName)) {
+					if (ForrestDataConfig.ignoreTableColumnMap.containsKey(tableFullName)) { // ignore table column
+						if (ForrestDataConfig.ignoreTableColumnMap.get(tableFullName).contains(columnName)) {
 							continue;
 						}
 					}

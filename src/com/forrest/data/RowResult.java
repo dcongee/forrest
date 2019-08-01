@@ -14,6 +14,12 @@ public class RowResult {
 	Map<String, String> gtidMap;
 	private static volatile RowResult rowResult;
 
+	/**
+	 * tableID,与tablefullname
+	 * 
+	 */
+	Map<Long, String> tableMap;
+
 	public RowResult() {
 		this.gtidMap = new HashMap<String, String>();
 	}
@@ -23,6 +29,9 @@ public class RowResult {
 			synchronized (ColumnResult.class) {
 				if (rowResult == null) {
 					rowResult = new RowResult();
+
+					// 初始化table map
+					rowResult.setTableMap(new HashMap<Long, String>());
 				}
 			}
 		}
@@ -98,6 +107,14 @@ public class RowResult {
 
 	public static void setRowResult(RowResult rowResult) {
 		RowResult.rowResult = rowResult;
+	}
+
+	public Map<Long, String> getTableMap() {
+		return tableMap;
+	}
+
+	public void setTableMap(Map<Long, String> tableMap) {
+		this.tableMap = tableMap;
 	}
 
 }

@@ -90,14 +90,14 @@ fd.ds.elasticsearch.id.with.mysql.primary=true
 
 
 #注意事项 
-#请先在ES中创建对应的索引。每一个MYSQL database对应一个ES中的INDEX。mysql中的每个表对应ES中的dcoment。MYSQL 主键值对ES中的_id值。ES中的其他字段为MYSQL表中的字段
-#ES中的INDEX名称为小写的database name，document名称为小写的table name。
+#请先在ES中创建对应的索引。每一个MYSQL database对应一个ES中的INDEX。mysql中的每个表对应ES中的TYPE。MYSQL 主键值对ES中的document _id值。ES中的其他字段为MYSQL表中的字段
+#ES中的INDEX名称为小写的database name，type名称为小写的table name。
 
 #表必须包含主键，需要同步的表，若不包含主键，启动报错。
 
 #表的主键名称不能发生变化，但主键值可以被UPDATE。
 
-#修改表名称，会产生一个新document。
+#修改表名称，会产生一个新type。
 
 #表的主键如果为联合主键。则多个主键值与符号"_"拼接成ES的document id.
 
@@ -106,5 +106,6 @@ fd.ds.elasticsearch.id.with.mysql.primary=true
 #truncate table 和drop table 不会删除ES中的索引与清空索引。
 
 #请务必不要修改表字段的顺序。新增字段或者修改字段时，不要使用after修改表字段顺序。
+
 
 

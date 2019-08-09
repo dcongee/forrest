@@ -34,7 +34,7 @@ fd.mysql.binlog.log.pos=4
 
 
 #######################replica destination start#################
-#数据同步到目标数据源，可以支持：redis,rabbitmq,stdout,file。若目标数据源为redis，则需要在redis.conf中配置redis信息；目标数据源为rabbitmq，则需要在rabbitmq.conf中配置rabbitmq信息。
+#数据同步到目标数据源，可以支持：redis,rabbitmq,stdout,file,elasticsearch。若目标数据源为redis，则需要在redis.conf中配置redis信息；目标数据源为rabbitmq，则需要在rabbitmq.conf中配置rabbitmq信息。
 #只能同步到一个目标数据源。
 fd.ds.type=rabbitmq
 #######################replica destination end###################
@@ -86,4 +86,25 @@ fd.ds.elasticsearch.id.with.mysql.primary=true
 
 3、启动
 #sh startup.sh
+
+
+
+#注意事项 
+#请先在ES中创建对应的索引。每一个MYSQL database对应一个ES中的INDEX。mysql中的每个表对应ES中的dcoment。MYSQL 主键值对ES中的_id值。ES中的其他字段为MYSQL表中的字段
+#ES中的INDEX名称为小写的database name，document名称为小写的table name。
+
+#表必须包含主键，需要同步的表，若不包含主键，启动报错。
+
+#表的主键名称不能发生变化，但主键值可以被UPDATE。
+
+#修改表名称，会产生一个新document。
+
+#表的主键如果为联合主键。则多个主键值与符号"_"拼接成ES的document id.
+
+#fd.ds.elasticsearch.ignore.404参数设置为false时，如果要删除的数据没存在ES中，则会一直进行重试。建议设置为true
+
+#truncate table 和drop table 不会删除ES中的索引与清空索引。
+
+#请务必不要修改表字段的顺序。新增字段或者修改字段时，不要使用after修改表字段顺序。
+
 

@@ -148,6 +148,19 @@ public abstract class ForrestDataAbstractDestination {
 	}
 
 	/**
+	 * 检测表是否都包含主键
+	 */
+	public void checkTablePrimaryKey() {
+		for (String tableKey : ForrestDataConfig.filterMap.keySet()) {
+			if (!ForrestDataConfig.tablePrimary.containsKey(tableKey)) {
+				ForrestDataConfig.filterMap.remove(tableKey);
+				logger.error("Not found primary key in table " + tableKey + ". All tables must have primary key. ");
+				System.exit(1);
+			}
+		}
+	}
+
+	/**
 	 * 删除数据中的元数据
 	 * 
 	 * @param row

@@ -61,6 +61,7 @@ public class ForrestDataConfig {
 	public static String metaBinlogPositionName = "BINLOG_POS";
 	public static String metaGTIDName = "MYSQL_GTID";
 	public static String metaSqltypeName = "SQL_TYPE";
+	public static String metaSqlContentName = "SQL_CONTENT";
 
 	public static boolean doUpdateData = false;
 	public static boolean doDeleteData = false;
@@ -73,7 +74,15 @@ public class ForrestDataConfig {
 	public static String updateAfterName = "AFTER_VALUE";
 
 	public static Map<String, String> sourceMySQLMetaDataMap = new HashMap<String, String>();
+
+	/**
+	 * 需要同步的表
+	 */
 	public static Map<String, String> filterMap = new HashMap<String, String>();
+
+	/**
+	 * 表的主键
+	 */
 	public static Map<String, List<String>> tablePrimary = new HashMap<String, List<String>>();
 	public static Map<String, Set<String>> ignoreTableColumnMap = new HashMap<String, Set<String>>();
 
@@ -232,7 +241,6 @@ public class ForrestDataConfig {
 		return sourceMySQLMetaDataMap;
 	}
 
-
 	/**
 	 * 从information_Schema.KEY_COLUMN_USAGE表中获取各个表的主键，联合主键，按字段进行排序
 	 */
@@ -323,6 +331,8 @@ public class ForrestDataConfig {
 			metaBinLogFileName = properties.getProperty("fd.meta.data.binlogfilename").trim();
 			metaBinlogPositionName = properties.getProperty("fd.meta.data.binlogposition").trim();
 			metaSqltypeName = properties.getProperty("fd.meta.data.sqltype").trim();
+			metaSqlContentName = properties.getProperty("fd.meta.data.sqlcontent").trim();
+
 			metaGTIDName = properties.getProperty("fd.meta.data.mysql.gtidname").trim();
 
 			in.close();
@@ -380,7 +390,7 @@ public class ForrestDataConfig {
 
 		httpServerPort = Integer.valueOf(properties.getProperty("fd.http.server.bind.port").trim());
 		httpServerHost = properties.getProperty("fd.http.server.bind.host").trim();
-		
+
 		logger.debug("forrest parameter loaded.");
 
 		initIgnoreTableColumn(ignoreColumns);

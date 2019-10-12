@@ -15,7 +15,7 @@ import org.apache.log4j.Logger;
 
 import com.forrest.data.config.ForrestDataConfig;
 import com.forrest.data.dest.ForrestDataDestination;
-import com.forrest.data.dest.impl.ForrestDataDestElasticSearch;
+import com.forrest.data.dest.impl.ForrestDataDestElasticSearchRest;
 import com.forrest.data.dest.impl.ForrestDataDestFile;
 import com.forrest.data.dest.impl.ForrestDataDestKafka;
 import com.forrest.data.dest.impl.ForrestDataDestRabbitMQ;
@@ -110,8 +110,9 @@ public class ForrestData {
 						QueryEventData queryData = (QueryEventData) event.getData();
 						String sql = queryData.getSql();
 						String ddlType = sql.trim().split(" ")[0].toUpperCase();
-						if (ddlType.equals("CREATE") || ddlType.equals("ALTER") || ddlType.equals("DROP")) {
-							List<Map<String, Object>> ddlResultList = parseExtQueryRowEvent(event, rowResult,
+						if (ddlType.equals("CREATE") || ddlType.equals("ALTER") || ddlType.equals("DROP")
+								|| ddlType.equals("TRUNCATE")) {
+							List<Map<String, Object>> ddlResultList = parseExtQueryRowEvent(event, rowResult, sql,
 									config.getGtidEnable());
 							if (ddlResultList != null) {
 								try {
@@ -470,13 +471,15 @@ public class ForrestData {
 		return deleteResultList;
 	}
 
-	List<Map<String, Object>> parseExtQueryRowEvent(Event event, RowResult rowResult, boolean gtidEnable) {
+	List<Map<String, Object>> parseExtQueryRowEvent(Event event, RowResult rowResult, String sql, boolean gtidEnable) {
 		EventHeader header = event.getHeader();
 		EventHeaderV4 headerV4 = (EventHeaderV4) header;
 		rowResult.setBinLogPos(headerV4.getNextPosition());
 		List<Map<String, Object>> ddlResultList = new ArrayList<Map<String, Object>>();
 		Map<String, Object> rowMap = new HashMap<String, Object>();
 		rowMap.put(ForrestDataConfig.metaSqltypeName, "DDL");
+		rowMap.put(ForrestDataConfig.metaSqlContentName, sql);
+
 		rowMap.put(ForrestDataConfig.metaBinlogPositionName, String.valueOf(rowResult.getBinLogPos())); // 下一个binlog
 		rowMap.put(ForrestDataConfig.metaBinLogFileName, rowResult.getBinLogFile());
 		if (gtidEnable) {
@@ -575,7 +578,8 @@ public class ForrestData {
 			dest = new ForrestDataDestRabbitMQ(config, forrestMonitor);
 			break;
 		case "ELASTICSEARCH":
-			dest = new ForrestDataDestElasticSearch(config, forrestMonitor);
+			// dest = new ForrestDataDestElasticSearch(config, forrestMonitor);
+			dest = new ForrestDataDestElasticSearchRest(config, forrestMonitor);
 			break;
 		case "KAFKA":
 			dest = new ForrestDataDestKafka(config, forrestMonitor);
